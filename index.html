@@ -330,6 +330,8 @@ body {
 <div id="controls">
   <button class="ctrl-btn" id="btn-mute">🔊 Mute</button>
   <button class="ctrl-btn" id="btn-single-hand">👆 Single Hand</button>
+  <button class="ctrl-btn" id="btn-fixed-wheel">📍 Fix Wheel</button>
+  <button class="ctrl-btn" id="btn-lock-chord">🔒 Lock Chord</button>
   <button class="ctrl-btn" id="btn-help">❓ Help</button>
 </div>
 
@@ -356,13 +358,13 @@ body {
       <tr><td>+9</td><td>add9</td></tr>
     </table>
     <p style="font-size:12px;color:rgba(255,255,255,0.5);text-align:center;margin-top:12px;">
-      右手在上 → ♯升半音 &nbsp;|&nbsp; 右手在下 → ♭降半音
+      左手在上 → ♯升半音 &nbsp;|&nbsp; 左手在下 → ♭降半音
     </p>
     <p style="font-size:12px;color:rgba(255,255,255,0.4);text-align:center;margin-top:4px;">
-      🎹 键盘: ASDFGHJ = C-B &nbsp;|&nbsp; 1-6 = 和弦类型
+      🎹 左侧键盘: ASDFGHJ = C-B &nbsp;|&nbsp; 1-6 = 和弦类型
     </p>
     <p style="font-size:12px;color:rgba(255,255,255,0.4);text-align:center;margin-top:2px;">
-      🔊 右侧滑条调节音量
+      🔊 右侧滑条 &nbsp;|&nbsp; 📍固定轮盘 &nbsp;|&nbsp; 🔒锁定和弦
     </p>
     <button class="close-btn" id="btn-help-close">关闭 Close</button>
   </div>
@@ -536,6 +538,8 @@ class StateManager extends Emitter {
       lockedSector: -1,
       currentType: 'maj7',
       currentSemitone: 0,  // -1=♭, 0=natural, +1=♯
+      fixedWheel: false,    // false=moving, true=fixed
+      lockChordType: false, // lock current chord type
       // Calibration
       calPhase: 'idle', // idle|fist|open|done
       calProgress: 0,
@@ -864,14 +868,16 @@ class ChordWheelDetector {
     this.state.set('wheelDistance', dist);
     this.state.set('wheelAngle', angle);
 
-    // Instant trigger — no dwell wait
+    // Instant trigger — no dwell wait (skip if chord type locked)
     if (sectorIdx !== prevSector) {
       this.state.update({ activeSector:sectorIdx, dwellStartTime:now(), dwellProgress:1, lockedSector:sectorIdx });
-      const chordType = CHORD_TYPES[sectorIdx];
-      if (chordType && chordType !== this.state.get('currentType')) {
-        this.state.set('currentType', chordType);
-        if (navigator.vibrate) navigator.vibrate(10);
-        return { type:'chordTypeChange', chordType, sector:sectorIdx, isNewLock:true };
+      if (!this.state.get('lockChordType')) {
+        const chordType = CHORD_TYPES[sectorIdx];
+        if (chordType && chordType !== this.state.get('currentType')) {
+          this.state.set('currentType', chordType);
+          if (navigator.vibrate) navigator.vibrate(10);
+          return { type:'chordTypeChange', chordType, sector:sectorIdx, isNewLock:true };
+        }
       }
     }
 
@@ -1191,17 +1197,25 @@ class CanvasRenderer {
       }
     }
 
-    // ---- Draw chord wheel (right hand) ----
+    // ---- Draw chord wheel ----
     const wristP = st.get('wristPos');
-    const idxP = st.get('indexTipPos');
     const activeSector = st.get('activeSector');
     const lockedSector = st.get('lockedSector');
     const dwellProgress = st.get('dwellProgress');
     const wheelAngle = st.get('wheelAngle');
     const wheelDist = st.get('wheelDistance');
+    const fixedWheel = st.get('fixedWheel');
 
-    if (st.get('rightPresent')) {
-      const wx = wristP.x, wy = wristP.y;
+    if (st.get('rightPresent') || fixedWheel) {
+      let wx, wy;
+      if (fixedWheel) {
+        // Fixed position: left 1/3, vertical center
+        wx = w * 0.33;
+        wy = h * 0.5;
+      } else {
+        wx = wristP.x;
+        wy = wristP.y;
+      }
       const r = CONFIG.wheelRadius * this.wheelScale;
 
       // Wheel scale animation
@@ -1566,12 +1580,34 @@ class App {
       document.getElementById('btn-single-hand').classList.toggle('active', !cur);
     });
 
-    // Volume slider
+    // Volume slider (invert: top=loud, bottom=quiet)
     const volumeSlider = document.getElementById('volume-slider');
     volumeSlider.addEventListener('input', () => {
-      const vol = parseInt(volumeSlider.value) / 100;
+      const vol = (100 - parseInt(volumeSlider.value)) / 100; // inverted
       if (this.audio.masterGain) {
-        this.audio.masterGain.gain.rampTo(vol * 0.8, 0.05);
+        this.audio.masterGain.gain.rampTo(0.1 + vol * 0.7, 0.05);
+      }
+    });
+
+    // Fixed wheel toggle
+    document.getElementById('btn-fixed-wheel').addEventListener('click', ()=>{
+      const cur = this.state.get('fixedWheel');
+      this.state.set('fixedWheel', !cur);
+      document.getElementById('btn-fixed-wheel').classList.toggle('active', !cur);
+    });
+
+    // Lock chord type toggle
+    document.getElementById('btn-lock-chord').addEventListener('click', ()=>{
+      const cur = this.state.get('lockChordType');
+      this.state.set('lockChordType', !cur);
+      document.getElementById('btn-lock-chord').classList.toggle('active', !cur);
+      if (!cur) {
+        // Just locked — snap to current wheel sector
+        const sector = this.state.get('activeSector');
+        if (sector >= 0) {
+          this.state.set('currentType', CHORD_TYPES[sector]);
+          this._triggerChordFromState();
+        }
       }
     });
 
@@ -1849,21 +1885,20 @@ class App {
           const vel = this.gestureRec.computeVelocity(leftLm);
           this.state.set('currentVelocity', vel);
 
-        }
-
-        // Right hand → wheel + semitone
-        if (rightLm) {
-          const w = this.canvas.width, h = this.canvas.height;
-
-          // Semitone shift from RIGHT hand height — triggers IMMEDIATELY
-          const rWristY = rightLm[0].y;
+          // Semitone shift from LEFT hand height
+          const lWristY = leftLm[0].y;
           let semitone = 0;
-          if (rWristY < 0.33) semitone = 1;
-          else if (rWristY > 0.66) semitone = -1;
+          if (lWristY < 0.33) semitone = 1;
+          else if (lWristY > 0.66) semitone = -1;
           if (semitone !== this.state.get('currentSemitone')) {
             this.state.set('currentSemitone', semitone);
             this._triggerChordFromState();
           }
+        }
+
+        // Right hand → wheel
+        if (rightLm) {
+          const w = this.canvas.width, h = this.canvas.height;
 
           const wheelResult = this.wheelDetector.process(rightLm, w, h);
           if (wheelResult?.type === 'chordTypeChange') {
@@ -1889,7 +1924,9 @@ class App {
       if (this.state.get('isHandLost')) {
         this.state.set('isHandLost', false);
         this.state.set('handLostStart', null);
-        this.audio.fadeIn(CONFIG.fadeInDuration);
+        if (!this._muted) {
+          this.audio.fadeIn(CONFIG.fadeInDuration);
+        }
       }
       if (this.handLostTimer) { clearTimeout(this.handLostTimer); this.handLostTimer = null; }
     } else if (this.handsEverDetected && this.state.get('stage')==='active') {
