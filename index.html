@@ -207,23 +207,44 @@ body {
   50% { box-shadow: 0 0 0 12px rgba(224,64,64,0); }
 }
 
-/* ---- Virtual Keyboard ---- */
+/* ---- Virtual Keyboard (left side, vertical) ---- */
 #keyboard {
-  position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
-  z-index: 50; display: flex; gap: 6px;
+  position: fixed; left: 16px; top: 50%; transform: translateY(-50%);
+  z-index: 50; display: flex; flex-direction: column; gap: 4px;
 }
 .key-btn {
-  width: 40px; height: 40px; border-radius: 6px;
+  width: 44px; height: 44px; border-radius: 6px;
   border: 1px solid rgba(255,255,255,0.3);
-  background: rgba(255,255,255,0.08);
-  color: rgba(255,255,255,0.75);
-  font-size: 13px; font-weight: 500;
-  cursor: pointer; text-align: center; line-height: 40px;
-  transition: all 0.15s ease;
+  background: rgba(0,0,0,0.45);
+  color: rgba(255,255,255,0.8);
+  font-size: 14px; font-weight: 600;
+  cursor: pointer; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  transition: all 0.15s ease; line-height: 1;
 }
-.key-btn:hover { background: rgba(255,255,255,0.2); }
+.key-btn:hover { background: rgba(255,255,255,0.15); }
 .key-btn.pressed { background: var(--chord-color); border-color: var(--chord-color); color: #000; }
-.key-btn .key-label { font-size: 9px; display: block; line-height: 1; margin-top: -2px; opacity: 0.6; }
+.key-btn .key-label { font-size: 8px; opacity: 0.5; }
+
+/* ---- Volume Slider (right side) ---- */
+#volume-slider-wrap {
+  position: fixed; right: 20px; top: 50%; transform: translateY(-50%);
+  z-index: 50; display: flex; flex-direction: column; align-items: center;
+  gap: 10px;
+}
+#volume-slider {
+  -webkit-appearance: slider-vertical;
+  width: 32px; height: 200px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 16px; border: 1px solid rgba(255,255,255,0.2);
+  outline: none; cursor: pointer;
+  writing-mode: vertical-lr;
+  accent-color: var(--chord-color);
+}
+#volume-label {
+  font-size: 11px; color: rgba(255,255,255,0.5);
+  letter-spacing: 0.05em;
+}
 
 /* ---- Help Modal ---- */
 #help-modal {
@@ -249,9 +270,10 @@ body {
 
 /* ---- Responsive ---- */
 @media (max-width: 600px) {
-  #keyboard { bottom: 120px; gap: 3px; }
-  .key-btn { width: 32px; height: 32px; font-size: 11px; line-height: 32px; }
+  #keyboard { left: 6px; gap: 2px; }
+  .key-btn { width: 34px; height: 34px; font-size: 12px; }
   #chord-display { top: 60px; }
+  #volume-slider-wrap { right: 6px; }
 }
 </style>
 </head>
@@ -287,7 +309,7 @@ body {
   <div class="hand-text">Show your hands to the camera</div>
 </div>
 
-<!-- Virtual Keyboard -->
+<!-- Virtual Keyboard (left, vertical) -->
 <div id="keyboard">
   <div class="key-btn" data-root="C">C<span class="key-label">A</span></div>
   <div class="key-btn" data-root="D">D<span class="key-label">S</span></div>
@@ -296,6 +318,12 @@ body {
   <div class="key-btn" data-root="G">G<span class="key-label">G</span></div>
   <div class="key-btn" data-root="A">A<span class="key-label">H</span></div>
   <div class="key-btn" data-root="B">B<span class="key-label">J</span></div>
+</div>
+
+<!-- Volume Slider (right side) -->
+<div id="volume-slider-wrap">
+  <span id="volume-label">VOL</span>
+  <input type="range" id="volume-slider" min="0" max="100" value="60" orient="vertical">
 </div>
 
 <!-- Controls -->
@@ -318,7 +346,7 @@ body {
       <tr><td>👍</td><td>仅拇指</td><td>→ A</td></tr>
       <tr><td>🤙</td><td>拇指+小指</td><td>→ B</td></tr>
     </table>
-    <h3 style="margin-top:20px;">🎡 右手轮盘 → 和弦类型</h3>
+    <h3 style="margin-top:20px;">🎡 右手轮盘 → 和弦</h3>
     <table>
       <tr><td>M7</td><td>maj7</td></tr>
       <tr><td>m7</td><td>min7</td></tr>
@@ -328,10 +356,13 @@ body {
       <tr><td>+9</td><td>add9</td></tr>
     </table>
     <p style="font-size:12px;color:rgba(255,255,255,0.5);text-align:center;margin-top:12px;">
-      左手在上方 → ♯升半音 &nbsp;|&nbsp; 左手在下方 → ♭降半音
+      右手在上 → ♯升半音 &nbsp;|&nbsp; 右手在下 → ♭降半音
     </p>
     <p style="font-size:12px;color:rgba(255,255,255,0.4);text-align:center;margin-top:4px;">
-      键盘: ASDFGHJ = C-B &nbsp; 1-6 = 和弦类型
+      🎹 键盘: ASDFGHJ = C-B &nbsp;|&nbsp; 1-6 = 和弦类型
+    </p>
+    <p style="font-size:12px;color:rgba(255,255,255,0.4);text-align:center;margin-top:2px;">
+      🔊 右侧滑条调节音量
     </p>
     <button class="close-btn" id="btn-help-close">关闭 Close</button>
   </div>
@@ -801,7 +832,7 @@ class ChordWheelDetector {
     const dx = ix - wx, dy = iy - wy;
     const dist = Math.hypot(dx, dy);
 
-    // Semitone shift removed from right hand — now on left hand
+    // Semitone from right hand (handled in main loop)
 
     // Check if index tip is within wheel
     if (dist < 15 || dist > CONFIG.wheelRadius) {
@@ -1535,6 +1566,15 @@ class App {
       document.getElementById('btn-single-hand').classList.toggle('active', !cur);
     });
 
+    // Volume slider
+    const volumeSlider = document.getElementById('volume-slider');
+    volumeSlider.addEventListener('input', () => {
+      const vol = parseInt(volumeSlider.value) / 100;
+      if (this.audio.masterGain) {
+        this.audio.masterGain.gain.rampTo(vol * 0.8, 0.05);
+      }
+    });
+
     // Help button
     document.getElementById('btn-help').addEventListener('click', ()=>{
       document.getElementById('help-modal').classList.add('show');
@@ -1809,20 +1849,22 @@ class App {
           const vel = this.gestureRec.computeVelocity(leftLm);
           this.state.set('currentVelocity', vel);
 
-          // Semitone shift from LEFT hand height (more responsive zones)
-          const leftWristY = leftLm[0].y;
+        }
+
+        // Right hand → wheel + semitone
+        if (rightLm) {
+          const w = this.canvas.width, h = this.canvas.height;
+
+          // Semitone shift from RIGHT hand height — triggers IMMEDIATELY
+          const rWristY = rightLm[0].y;
           let semitone = 0;
-          if (leftWristY < 0.25) semitone = 1;       // top quarter → ♯
-          else if (leftWristY > 0.75) semitone = -1; // bottom quarter → ♭
+          if (rWristY < 0.33) semitone = 1;
+          else if (rWristY > 0.66) semitone = -1;
           if (semitone !== this.state.get('currentSemitone')) {
             this.state.set('currentSemitone', semitone);
             this._triggerChordFromState();
           }
-        }
 
-        // Right hand → wheel
-        if (rightLm) {
-          const w = this.canvas.width, h = this.canvas.height;
           const wheelResult = this.wheelDetector.process(rightLm, w, h);
           if (wheelResult?.type === 'chordTypeChange') {
             this._onTypeChange(wheelResult.chordType, rightLm);
