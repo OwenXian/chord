@@ -1528,6 +1528,7 @@ class App {
     const calProgress = document.getElementById('cal-progress-fill');
     const chordDisplay = document.getElementById('chord-display');
     const handLostGuide = document.getElementById('hand-lost-guide');
+    const btnSkip = document.getElementById('btn-skip');
 
     // Store refs
     this.ui = { splash, btnStart, btnSkip, progressFill, loaderText, calOverlay, calTitle, calHint, calProgress, chordDisplay, handLostGuide };
@@ -1536,9 +1537,6 @@ class App {
     btnStart.addEventListener('click', async () => {
       await this.start(false);
     });
-
-    // Skip camera button
-    const btnSkip = document.getElementById('btn-skip');
     btnSkip.addEventListener('click', async () => {
       btnSkip.textContent = 'Starting...';
       await this.start(true);
