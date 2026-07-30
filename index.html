@@ -446,20 +446,29 @@ const FINGERS = [
   { name:'pinky',  mcp:17, pip:18, dip:19, tip:20 },
 ];
 
-// Chord definitions
-const CHORD_TYPES = ['maj7','min7','7','maj','min','add9'];
+// Wheel 1 (lower): 6 types — Wheel 2 (upper): 5 types
+const CHORD_TYPES_1 = ['maj7','min7','7','maj','min','add9'];
+const CHORD_TYPES_2 = ['sus2','sus4','dim7','aug7','aug9'];
+const CHORD_LABELS_1 = { maj7:'M7', min7:'m7', 7:'7', maj:'M', min:'m', add9:'+9' };
+const CHORD_LABELS_2 = { sus2:'S2', sus4:'S4', dim7:'d7', aug7:'A7', aug9:'A9' };
 const CHORD_INTERVALS = {
   maj7: [0,4,7,11], min7: [0,3,7,10], 7: [0,4,7,10],
-  maj: [0,4,7], min: [0,3,7], add9: [0,2,4,7]
+  maj: [0,4,7], min: [0,3,7], add9: [0,2,4,7],
+  sus2: [0,2,7], sus4: [0,5,7], dim7: [0,3,6,9],
+  aug7: [0,4,8,10], aug9: [0,4,8,14]
 };
-const CHORD_LABELS = { maj7:'M7', min7:'m7', 7:'7', maj:'M', min:'m', add9:'+9' };
 const CHORD_COLORS = {
-  maj7: { hex:'#FF8C42', rgb:[255,140,66] },    // warm orange
-  min7: { hex:'#7B5EA7', rgb:[123,94,167] },     // cool purple
-  7:    { hex:'#4A90D9', rgb:[74,144,217] },     // blue
-  maj:  { hex:'#F0C040', rgb:[240,192,64] },     // gold
-  min:  { hex:'#5B7FA5', rgb:[91,127,165] },     // deep blue-gray
-  add9: { hex:'#3CB89C', rgb:[60,184,156] },     // cyan-green
+  maj7: { hex:'#FF8C42', rgb:[255,140,66] },
+  min7: { hex:'#7B5EA7', rgb:[123,94,167] },
+  7:    { hex:'#4A90D9', rgb:[74,144,217] },
+  maj:  { hex:'#F0C040', rgb:[240,192,64] },
+  min:  { hex:'#5B7FA5', rgb:[91,127,165] },
+  add9: { hex:'#3CB89C', rgb:[60,184,156] },
+  sus2: { hex:'#E87890', rgb:[232,120,144] },
+  sus4: { hex:'#8BC34A', rgb:[139,195,74] },
+  dim7: { hex:'#9C27B0', rgb:[156,39,176] },
+  aug7: { hex:'#FF5722', rgb:[255,87,34] },
+  aug9: { hex:'#00BCD4', rgb:[0,188,212] },
 };
 
 // Root notes from gestures
@@ -538,8 +547,9 @@ class StateManager extends Emitter {
       lockedSector: -1,
       currentType: 'maj7',
       currentSemitone: 0,  // -1=♭, 0=natural, +1=♯
-      fixedWheel: false,    // false=moving, true=fixed
-      lockChordType: false, // lock current chord type
+      currentWheel: 1,      // 1=lower wheel (6 types), 2=upper wheel (5 types)
+      fixedWheel: false,
+      lockChordType: false,
       // Calibration
       calPhase: 'idle', // idle|fist|open|done
       calProgress: 0,
@@ -817,17 +827,15 @@ class GestureRecognizer {
 class ChordWheelDetector {
   constructor(state) { this.state = state; }
 
-  process(rightLandmarks, canvasW, canvasH) {
+  process(rightLandmarks, canvasW, canvasH, numSectors, chordTypes) {
     if (!rightLandmarks) {
       this.state.update({ activeSector:-1, dwellStartTime:0, dwellProgress:0 });
       return null;
     }
 
-    // Wrist = landmark 0, Index tip = landmark 8
     const wrist = rightLandmarks[0];
     const idxTip = rightLandmarks[8];
 
-    // Mirror X for canvas coordinates
     const wx = (1-wrist.x) * canvasW;
     const wy = wrist.y * canvasH;
     const ix = (1-idxTip.x) * canvasW;
@@ -835,28 +843,22 @@ class ChordWheelDetector {
 
     this.state.update({ wristPos:{x:wx,y:wy}, indexTipPos:{x:ix,y:iy} });
 
-    // Distance from wrist to index tip
     const dx = ix - wx, dy = iy - wy;
     const dist = Math.hypot(dx, dy);
 
-    // Dynamic wheel radius: 15% of smaller viewport dimension, max 140px
     const wheelR = Math.min(Math.min(canvasW, canvasH) * 0.15, 140);
 
-    // Check if index tip is within wheel
     if (dist < 15 || dist > wheelR) {
       this.state.update({ activeSector:-1, dwellStartTime:0, dwellProgress:0, wheelDistance:dist });
       return null;
     }
 
-    // Compute angle (0 = upward, clockwise)
-    let angle = Math.atan2(dx, -dy); // atan2(x, -y) for clockwise from top
+    let angle = Math.atan2(dx, -dy);
     if (angle < 0) angle += Math.PI*2;
 
-    const sectorAngle = (Math.PI*2) / 6;
+    const sectorAngle = (Math.PI*2) / numSectors;
     const rawSector = Math.floor(angle / sectorAngle);
-    // Order sectors starting from top, clockwise: maj7,min7,7,maj,min,add9
 
-    // Hysteresis: fingertip must be at least hysteresisPx into a new sector to register
     const angleInSector = angle - rawSector*sectorAngle;
     const angleMargin = Math.atan2(CONFIG.hysteresisPx, Math.max(dist, 30));
     const nearBoundary = angleInSector < angleMargin || angleInSector > sectorAngle - angleMargin;
@@ -864,7 +866,6 @@ class ChordWheelDetector {
     const prevSector = this.state.get('activeSector');
     let sectorIdx = rawSector;
 
-    // If near boundary and in a different raw sector, stay in previous sector
     if (nearBoundary && prevSector >= 0 && rawSector !== prevSector) {
       sectorIdx = prevSector;
     }
@@ -872,11 +873,10 @@ class ChordWheelDetector {
     this.state.set('wheelDistance', dist);
     this.state.set('wheelAngle', angle);
 
-    // Instant trigger — no dwell wait (skip if chord type locked)
-    if (sectorIdx !== prevSector) {
+    if (sectorIdx !== prevSector && sectorIdx < numSectors) {
       this.state.update({ activeSector:sectorIdx, dwellStartTime:now(), dwellProgress:1, lockedSector:sectorIdx });
       if (!this.state.get('lockChordType')) {
-        const chordType = CHORD_TYPES[sectorIdx];
+        const chordType = chordTypes[sectorIdx];
         if (chordType && chordType !== this.state.get('currentType')) {
           this.state.set('currentType', chordType);
           if (navigator.vibrate) navigator.vibrate(10);
@@ -1197,27 +1197,27 @@ class CanvasRenderer {
     }
 
     // ---- Draw chord wheel ----
-    const wristP = st.get('wristPos');
     const activeSector = st.get('activeSector');
     const lockedSector = st.get('lockedSector');
     const dwellProgress = st.get('dwellProgress');
-    const wheelAngle = st.get('wheelAngle');
-    const wheelDist = st.get('wheelDistance');
     const fixedWheel = st.get('fixedWheel');
+    const activeWheel = st.get('currentWheel');
+    const numSectors = activeWheel === 1 ? 6 : 5;
+    const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
+    const chordLabels = activeWheel === 1 ? CHORD_LABELS_1 : CHORD_LABELS_2;
 
     if (st.get('rightPresent') || fixedWheel) {
       let wx, wy;
       if (fixedWheel) {
-        // Fixed position: left 1/3, vertical center
-        wx = w * 0.33;
-        wy = h * 0.5;
+        // Fixed: right side, wheel 2 top-right, wheel 1 bottom-right
+        if (activeWheel === 2) { wx = w * 0.75; wy = h * 0.3; }
+        else { wx = w * 0.75; wy = h * 0.7; }
       } else {
-        wx = wristP.x;
-        wy = wristP.y;
+        wx = st.get('wristPos').x;
+        wy = st.get('wristPos').y;
       }
-      // Responsive wheel radius: 15% of the smaller viewport dimension
-      const rr = Math.min(w, h) * 0.15;
-      const r = Math.min(rr, 140);
+      const rr = Math.min(w, h) * 0.13;
+      const r = Math.min(rr, 130);
 
       ctx.save();
       ctx.translate(wx, wy);
@@ -1230,12 +1230,12 @@ class CanvasRenderer {
       ctx.stroke();
 
       // Sectors
-      const sectorAngle = (Math.PI*2)/6;
-      for (let i=0; i<6; i++) {
+      const sectorAngle = (Math.PI*2)/numSectors;
+      for (let i=0; i<numSectors; i++) {
         const startA = -Math.PI/2 + i*sectorAngle;
         const endA = startA + sectorAngle;
-        const chordType = CHORD_TYPES[i];
-        const colorRgb = CHORD_COLORS[chordType].rgb;
+        const chordType = chordTypes[i];
+        const colorRgb = CHORD_COLORS[chordType]?.rgb || [255,255,255];
         const isActive = (activeSector===i);
         const isLocked = (lockedSector===i);
 
@@ -1250,7 +1250,6 @@ class CanvasRenderer {
             : rgbToCss(...colorRgb, 0.12);
         ctx.fill();
 
-        // Glow on locked sector
         if (isLocked) {
           ctx.shadowColor = rgbToCss(...colorRgb, 0.7);
           ctx.shadowBlur = 18;
@@ -1260,7 +1259,6 @@ class CanvasRenderer {
           ctx.shadowBlur = 0;
         }
 
-        // Sector border
         ctx.beginPath();
         ctx.moveTo(0,0);
         ctx.arc(0, 0, r, startA, endA);
@@ -1269,7 +1267,6 @@ class CanvasRenderer {
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // Label
         const midA = startA + sectorAngle/2;
         const lx = Math.cos(midA) * r * 0.62;
         const ly = Math.sin(midA) * r * 0.62;
@@ -1277,60 +1274,26 @@ class CanvasRenderer {
         ctx.font = 'bold 11px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(CHORD_LABELS[chordType], lx, ly);
+        ctx.fillText(chordLabels[chordType] || '?', lx, ly);
       }
 
-      // Dwell progress arc
-      if (activeSector >= 0 && dwellProgress > 0) {
+      // Dwell progress arc (instant trigger, always full)
+      if (activeSector >= 0) {
         const startA = -Math.PI/2 + activeSector*sectorAngle;
-        const sweepA = sectorAngle * dwellProgress;
         ctx.beginPath();
-        ctx.arc(0, 0, r+6, startA, startA + sweepA);
-        ctx.strokeStyle = rgbToCss(...this.chordColorRgb, 0.9);
-        ctx.lineWidth = 3;
+        ctx.arc(0, 0, r+5, startA, startA + sectorAngle);
+        ctx.strokeStyle = rgbToCss(...this.chordColorRgb, 0.7);
+        ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
         ctx.stroke();
         ctx.lineCap = 'butt';
-      }
-
-      // Angle indicator line (wrist to index finger direction)
-      if (wheelDist > 10) {
-        const ax = Math.cos(wheelAngle - Math.PI/2) * Math.min(wheelDist, r);
-        const ay = Math.sin(wheelAngle - Math.PI/2) * Math.min(wheelDist, r);
-        ctx.beginPath();
-        ctx.moveTo(0,0);
-        ctx.lineTo(ax, ay);
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.stroke();
-        ctx.lineCap = 'butt';
-
-        // Dot at fingertip
-        ctx.beginPath();
-        ctx.arc(ax, ay, 4, 0, Math.PI*2);
-        ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.fill();
       }
 
       // Center dot
       ctx.beginPath();
-      ctx.arc(0, 0, 5, 0, Math.PI*2);
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
-      ctx.fill();
-
-      // Semitone indicator
-      const semitone = st.get('currentSemitone');
-      const barX = r + 16;
-      for (let si=-1; si<=1; si++) {
-        const by = si * -10;
-        ctx.fillStyle = semitone===si ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.2)';
-        ctx.fillRect(barX-2, by-2, 6, 4);
-      }
+      ctx.arc(0, 0, 4, 0, Math.PI*2);
       ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      ctx.font = '9px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(semitone>0?'♯':semitone<0?'♭':'', barX+6, 3);
+      ctx.fill();
 
       ctx.restore();
     }
@@ -1442,7 +1405,7 @@ class Recorder {
     const compact = this.events.map(e => ({
       t: Math.round(e.t*1000),
       r: ROOT_NOTES.indexOf(e.root),
-      c: CHORD_TYPES.indexOf(e.type),
+      c: CHORD_TYPES_1.indexOf(e.type) >= 0 ? CHORD_TYPES_1.indexOf(e.type) : CHORD_TYPES_2.indexOf(e.type),
       s: e.st||0
     }));
     return btoa(JSON.stringify(compact));
@@ -1454,7 +1417,7 @@ class Recorder {
       this.events = compact.map(e => ({
         t: e.t/1000,
         root: ROOT_NOTES[e.r],
-        type: CHORD_TYPES[e.c],
+        type: e.c < CHORD_TYPES_1.length ? CHORD_TYPES_1[e.c] : CHORD_TYPES_2[e.c - CHORD_TYPES_1.length],
         st: e.s||0
       }));
       return this.events;
@@ -1600,7 +1563,8 @@ class App {
         // Just locked — snap to current wheel sector
         const sector = this.state.get('activeSector');
         if (sector >= 0) {
-          this.state.set('currentType', CHORD_TYPES[sector]);
+          const types = this.state.get('currentWheel') === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
+          if (sector < types.length) this.state.set('currentType', types[sector]);
           this._triggerChordFromState();
         }
       }
@@ -1753,9 +1717,11 @@ class App {
         console.warn('[App] Camera unavailable:', this.camera.lastError);
       }
     }
-    const vw = this.video.videoWidth || 640;
-    const vh = this.video.videoHeight || 480;
-    this.renderer.resize(vw, vh);
+    // Canvas matches viewport (prevents elliptical wheels)
+    this.renderer.resize(window.innerWidth, window.innerHeight);
+    window.addEventListener('resize', () => {
+      this.renderer.resize(window.innerWidth, window.innerHeight);
+    });
     await audioPromise;
 
     if (res && shouldTryCamera) {
@@ -1860,8 +1826,8 @@ class App {
           }
           // Chord type from horizontal position
           const wristX = hand[0].x; // 0-1 normalized
-          const typeIdx = Math.floor(wristX * 6);
-          const ct = CHORD_TYPES[Math.min(typeIdx, 5)];
+          const typeIdx = Math.floor(wristX * CHORD_TYPES_1.length);
+          const ct = CHORD_TYPES_1[Math.min(typeIdx, CHORD_TYPES_1.length-1)];
           if (ct !== this.state.get('currentType')) {
             this.state.set('currentType', ct);
             this._onTypeChange(ct, hand);
@@ -1891,11 +1857,18 @@ class App {
           }
         }
 
-        // Right hand → wheel
+        // Right hand → wheel (hand height determines which wheel)
         if (rightLm) {
           const w = this.canvas.width, h = this.canvas.height;
 
-          const wheelResult = this.wheelDetector.process(rightLm, w, h);
+          // Hand in top half → wheel 2, bottom half → wheel 1
+          const rWristY = rightLm[0].y;
+          const activeWheel = rWristY < 0.5 ? 2 : 1;
+          this.state.set('currentWheel', activeWheel);
+
+          const numSectors = activeWheel === 1 ? 6 : 5;
+          const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
+          const wheelResult = this.wheelDetector.process(rightLm, w, h, numSectors, chordTypes);
           if (wheelResult?.type === 'chordTypeChange') {
             this._onTypeChange(wheelResult.chordType, rightLm);
           }
