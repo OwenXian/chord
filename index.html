@@ -1,0 +1,1974 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Gesture Chord Instrument — 手势和弦乐器</title>
+
+<!-- ============================================================ -->
+<!-- CDN: Import Map for MediaPipe (resolves bare specifier + internal sub-imports) -->
+<!-- ============================================================ -->
+<script type="importmap">
+{
+  "imports": {
+    "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs",
+    "@mediapipe/tasks-vision/": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/"
+  }
+}
+</script>
+
+<!-- ============================================================ -->
+<!-- CDN: Tone.js -->
+<!-- ============================================================ -->
+<script src="https://cdn.jsdelivr.net/npm/tone@14.7.58/build/Tone.js"></script>
+
+<!-- ============================================================ -->
+<!-- CSS -->
+<!-- ============================================================ -->
+<style>
+:root {
+  --chord-color: #FF8C42;
+  --chord-color-rgb: 255,140,66;
+  --bg-dark: #0a0a0f;
+  --transition-speed: 2s;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 100vw; height: 100vh; overflow: hidden;
+  background: #000;
+  font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+/* ---- Video ---- */
+#video {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  filter: contrast(1.2) brightness(0.9) saturate(1.5);
+  z-index: 1;
+}
+
+/* ---- Canvas ---- */
+#canvas {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 2;
+}
+
+/* ---- Splash Screen ---- */
+#splash {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0f 70%);
+  z-index: 100;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  transition: opacity 0.8s ease-out;
+}
+#splash.hidden { opacity: 0; pointer-events: none; }
+#splash h1 {
+  font-size: clamp(28px, 5vw, 52px);
+  font-weight: 300; letter-spacing: 0.15em;
+  color: #fff; margin-bottom: 8px;
+  text-shadow: 0 0 40px rgba(255,140,66,0.5);
+}
+#splash .subtitle {
+  font-size: 14px; color: rgba(255,255,255,0.5);
+  letter-spacing: 0.2em; margin-bottom: 48px;
+}
+#progress-bar {
+  width: 280px; height: 3px; background: rgba(255,255,255,0.1);
+  border-radius: 2px; overflow: hidden; margin-bottom: 32px;
+}
+#progress-fill {
+  width: 0%; height: 100%;
+  background: linear-gradient(90deg, #FF8C42, #F0C040);
+  transition: width 0.3s ease;
+  border-radius: 2px;
+}
+#btn-start {
+  padding: 14px 48px; font-size: 16px; letter-spacing: 0.1em;
+  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.06);
+  color: #fff; cursor: pointer; border-radius: 30px;
+  transition: all 0.3s ease;
+  opacity: 0.5; pointer-events: none;
+}
+#btn-start.ready { opacity: 1; pointer-events: auto; }
+#btn-start.ready:hover {
+  background: rgba(255,255,255,0.14);
+  border-color: rgba(255,255,255,0.6);
+  box-shadow: 0 0 30px rgba(255,140,66,0.25);
+}
+#splash .loader-text {
+  font-size: 12px; color: rgba(255,255,255,0.35);
+  margin-top: 16px;
+}
+
+/* ---- Calibration Overlay ---- */
+#calibrate-overlay {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 90; text-align: center;
+  pointer-events: none; display: none;
+}
+#calibrate-overlay.active { display: block; }
+#calibrate-overlay .cal-title {
+  font-size: 22px; color: #fff; letter-spacing: 0.08em;
+  text-shadow: 0 0 20px rgba(255,255,255,0.4);
+  margin-bottom: 12px;
+}
+#calibrate-overlay .cal-hint {
+  font-size: 14px; color: rgba(255,255,255,0.55);
+}
+#calibrate-overlay .cal-progress {
+  width: 200px; height: 2px; background: rgba(255,255,255,0.15);
+  margin: 16px auto 0; border-radius: 1px; overflow: hidden;
+}
+#calibrate-overlay .cal-progress-fill {
+  height: 100%; background: #F0C040;
+  transition: width 0.2s ease;
+}
+
+/* ---- Chord Display HUD ---- */
+#chord-display {
+  position: fixed; top: 32px; left: 50%; transform: translateX(-50%);
+  z-index: 50; font-size: clamp(24px, 6vw, 48px);
+  font-weight: 600; letter-spacing: 0.06em;
+  color: var(--chord-color);
+  text-shadow: 0 0 30px var(--chord-color), 0 0 60px var(--chord-color);
+  transition: color var(--transition-speed) ease,
+              text-shadow var(--transition-speed) ease;
+  pointer-events: none;
+}
+
+/* ---- FPS ---- */
+#fps-counter {
+  position: fixed; top: 12px; right: 16px;
+  z-index: 50; font-size: 11px; color: rgba(255,255,255,0.5);
+  font-family: monospace; pointer-events: none;
+}
+
+/* ---- Hand Lost Guide ---- */
+#hand-lost-guide {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 40; pointer-events: none; opacity: 0;
+  transition: opacity 0.6s ease;
+  text-align: center;
+}
+#hand-lost-guide.visible { opacity: 0.7; }
+#hand-lost-guide .hand-icon {
+  font-size: 64px; margin-bottom: 12px;
+  animation: pulse 2s ease-in-out infinite;
+}
+#hand-lost-guide .hand-text {
+  font-size: 14px; color: rgba(255,255,255,0.6);
+  letter-spacing: 0.1em;
+}
+@keyframes pulse {
+  0%,100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.06); }
+}
+
+/* ---- Controls Bar ---- */
+#controls {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  z-index: 50; display: flex; gap: 10px; flex-wrap: wrap;
+  justify-content: center;
+}
+.ctrl-btn {
+  padding: 8px 18px; font-size: 12px; letter-spacing: 0.06em;
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(0,0,0,0.5); color: rgba(255,255,255,0.8);
+  border-radius: 20px; cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all 0.25s ease;
+}
+.ctrl-btn:hover {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.5);
+}
+.ctrl-btn.active {
+  background: var(--chord-color);
+  border-color: var(--chord-color);
+  color: #000;
+}
+.ctrl-btn.recording {
+  background: #e04040; border-color: #e04040; color: #fff;
+  animation: rec-pulse 1s ease-in-out infinite;
+}
+@keyframes rec-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(224,64,64,0.5); }
+  50% { box-shadow: 0 0 0 12px rgba(224,64,64,0); }
+}
+
+/* ---- Virtual Keyboard ---- */
+#keyboard {
+  position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+  z-index: 50; display: flex; gap: 6px;
+}
+.key-btn {
+  width: 40px; height: 40px; border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.75);
+  font-size: 13px; font-weight: 500;
+  cursor: pointer; text-align: center; line-height: 40px;
+  transition: all 0.15s ease;
+}
+.key-btn:hover { background: rgba(255,255,255,0.2); }
+.key-btn.pressed { background: var(--chord-color); border-color: var(--chord-color); color: #000; }
+.key-btn .key-label { font-size: 9px; display: block; line-height: 1; margin-top: -2px; opacity: 0.6; }
+
+/* ---- Responsive ---- */
+@media (max-width: 600px) {
+  #keyboard { bottom: 120px; gap: 3px; }
+  .key-btn { width: 32px; height: 32px; font-size: 11px; line-height: 32px; }
+  #chord-display { top: 60px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Splash Screen -->
+<div id="splash">
+  <h1>手势和弦乐器</h1>
+  <div class="subtitle">GESTURE CHORD INSTRUMENT</div>
+  <div id="progress-bar"><div id="progress-fill"></div></div>
+  <button id="btn-start">▸ 开始体验 START</button>
+  <div class="loader-text" id="loader-text">Loading model…</div>
+  <button id="btn-skip" style="display:none;background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;margin-top:14px;font-size:12px;text-decoration:underline;">Skip camera — keyboard only</button>
+</div>
+
+<!-- Calibration -->
+<div id="calibrate-overlay">
+  <div class="cal-title" id="cal-title">Make a fist ✊</div>
+  <div class="cal-hint" id="cal-hint">Hold still for 2 seconds</div>
+  <div class="cal-progress"><div class="cal-progress-fill" id="cal-progress-fill" style="width:0%"></div></div>
+</div>
+
+<!-- Camera + Canvas -->
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+
+<!-- Chord Display -->
+<div id="chord-display">C maj7</div>
+
+<!-- FPS -->
+<div id="fps-counter">-- fps</div>
+
+<!-- Hand Lost Guide -->
+<div id="hand-lost-guide">
+  <div class="hand-icon">🖐️</div>
+  <div class="hand-text">Show your hands to the camera</div>
+</div>
+
+<!-- Virtual Keyboard -->
+<div id="keyboard">
+  <div class="key-btn" data-root="C">C<span class="key-label">A</span></div>
+  <div class="key-btn" data-root="D">D<span class="key-label">S</span></div>
+  <div class="key-btn" data-root="E">E<span class="key-label">D</span></div>
+  <div class="key-btn" data-root="F">F<span class="key-label">F</span></div>
+  <div class="key-btn" data-root="G">G<span class="key-label">G</span></div>
+  <div class="key-btn" data-root="A">A<span class="key-label">H</span></div>
+  <div class="key-btn" data-root="B">B<span class="key-label">J</span></div>
+</div>
+
+<!-- Controls -->
+<div id="controls">
+  <button class="ctrl-btn" id="btn-mute">🔊 Mute</button>
+  <button class="ctrl-btn" id="btn-single-hand">👆 Single Hand</button>
+  <button class="ctrl-btn" id="btn-hand-mode">🔇 Mute on Loss</button>
+  <button class="ctrl-btn" id="btn-record">⏺ Record</button>
+  <button class="ctrl-btn" id="btn-playback">▶ Play</button>
+  <button class="ctrl-btn" id="btn-share">🔗 Share</button>
+</div>
+
+<!-- ============================================================ -->
+<!-- JavaScript -->
+<!-- ============================================================ -->
+<script type="module">
+// ================================================================
+// SECTION 1: MEDIAPIPE DYNAMIC IMPORT WITH FALLBACKS
+// ================================================================
+let HandLandmarker = null, FilesetResolver = null;
+
+async function loadMediaPipeModule() {
+  // Use bare specifier — resolved by import map to jsDelivr CDN
+  try {
+    console.log('[Bootstrap] Loading @mediapipe/tasks-vision via import map');
+    const mod = await import('@mediapipe/tasks-vision');
+    HandLandmarker = mod.HandLandmarker;
+    FilesetResolver = mod.FilesetResolver;
+    if (HandLandmarker && FilesetResolver) {
+      console.log('[Bootstrap] MediaPipe loaded via import map');
+      return true;
+    }
+  } catch(e) {
+    console.warn('[Bootstrap] Import map failed:', e.message);
+  }
+
+  // Fallback: try multiple CDN URLs with different file names and paths
+  const fallbackUrls = [
+    // jsdelivr — vision_bundle.mjs (main bundle, not hand-specific)
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs',
+    // jsdelivr — hand_landmarker in subdir with dots
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/hand_landmarker/hand_landmarker.bundle.mjs',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker/hand_landmarker.bundle.mjs',
+    // jsdelivr — bare package (resolves via main/module field)
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm',
+    // esm.sh
+    'https://esm.sh/@mediapipe/tasks-vision@0.10.3',
+  ];
+  for (const url of fallbackUrls) {
+    try {
+      console.log('[Bootstrap] Trying:', url);
+      const mod = await import(url);
+      HandLandmarker = mod.HandLandmarker;
+      FilesetResolver = mod.FilesetResolver;
+      if (HandLandmarker && FilesetResolver) {
+        console.log('[Bootstrap] MediaPipe loaded from:', url);
+        return true;
+      }
+    } catch(e2) {
+      console.warn('[Bootstrap] Failed:', url, e2.message);
+    }
+  }
+
+  console.error('[Bootstrap] ALL CDN sources failed — network may be restricted');
+  return false;
+}
+
+// ================================================================
+// SECTION 2: CONSTANTS & CONFIG
+// ================================================================
+
+// Hand landmark connections for skeleton drawing
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,13],[13,17],[0,17],[9,10],[10,11],[11,12],
+  [13,14],[14,15],[15,16],[17,18],[18,19],[19,20]
+];
+
+// Finger definitions: [name, mcpIdx, pipIdx, dipIdx, tipIdx]
+const FINGERS = [
+  { name:'thumb',  mcp:1, pip:2, dip:3, tip:4 },
+  { name:'index',  mcp:5, pip:6, dip:7, tip:8 },
+  { name:'middle', mcp:9, pip:10, dip:11, tip:12 },
+  { name:'ring',   mcp:13, pip:14, dip:15, tip:16 },
+  { name:'pinky',  mcp:17, pip:18, dip:19, tip:20 },
+];
+
+// Chord definitions
+const CHORD_TYPES = ['maj7','min7','7','maj','min','add9'];
+const CHORD_INTERVALS = {
+  maj7: [0,4,7,11], min7: [0,3,7,10], 7: [0,4,7,10],
+  maj: [0,4,7], min: [0,3,7], add9: [0,2,4,7]
+};
+const CHORD_LABELS = { maj7:'M7', min7:'m7', 7:'7', maj:'M', min:'m', add9:'+9' };
+const CHORD_COLORS = {
+  maj7: { hex:'#FF8C42', rgb:[255,140,66] },    // warm orange
+  min7: { hex:'#7B5EA7', rgb:[123,94,167] },     // cool purple
+  7:    { hex:'#4A90D9', rgb:[74,144,217] },     // blue
+  maj:  { hex:'#F0C040', rgb:[240,192,64] },     // gold
+  min:  { hex:'#5B7FA5', rgb:[91,127,165] },     // deep blue-gray
+  add9: { hex:'#3CB89C', rgb:[60,184,156] },     // cyan-green
+};
+
+// Root notes from gestures
+const ROOT_NOTES = ['C','D','E','F','G','A','B'];
+const GESTURE_ROOTS = {
+  index_only:              'C',
+  index_middle:            'D',
+  index_middle_ring:       'E',
+  four_fingers:            'F',
+  all_five:                'G',
+  thumb_only:              'A',
+  thumb_pinky:             'B',
+};
+
+const ROOT_MIDI = { C:60,'C#':61,D:62,'D#':63,E:64,F:65,'F#':66,G:67,'G#':68,A:69,'A#':70,B:71 };
+// C4-B4 range, chords extend into C5 (~262-523Hz)
+
+const CONFIG = {
+  wheelRadius: 120,
+  dwellTime: 400,          // ms to lock chord type
+  hysteresisPx: 5,         // px into sector to register (reduced for instant response)
+  debounceFrames: 6,       // consecutive frames for root confirmation
+  cooldownMs: 300,         // min ms between root changes
+  crossfadeMs: 0.15,       // seconds for A/B crossfade (smooth legato)
+  handLostTimeout: 2000,   // ms before hand loss triggers
+  fadeOutDuration: 2,      // seconds to fade on hand loss
+  fadeInDuration: 1,       // seconds to restore on hand return
+  particleCount: 18,
+  fpsWindow: 30,           // rolling frames for FPS
+  fpsLowThreshold: 20,     // fps below which we degrade
+  velocityMin: 0.3,
+  velocityMax: 1.0,
+  calibrationFrames: 40,
+};
+
+// ================================================================
+// SECTION 2: UTILITY FUNCTIONS
+// ================================================================
+function lerp(a,b,t) { return a + (b-a)*t; }
+function clamp(v,lo,hi) { return Math.max(lo, Math.min(hi, v)); }
+function dist2d(x1,y1,x2,y2) { return Math.hypot(x2-x1, y2-y1); }
+function now() { return performance.now(); }
+
+function hexToRgb(hex) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] : [255,255,255];
+}
+
+function rgbToCss(r,g,b,a=1) { return `rgba(${r},${g},${b},${a})`; }
+
+// Simple event emitter
+class Emitter {
+  constructor() { this._cbs = new Map(); }
+  on(ev, cb) { if(!this._cbs.has(ev)) this._cbs.set(ev,[]); this._cbs.get(ev).push(cb); }
+  emit(ev, data) { (this._cbs.get(ev)||[]).forEach(cb => cb(data)); }
+}
+
+// ================================================================
+// SECTION 3: STATE MANAGER
+// ================================================================
+class StateManager extends Emitter {
+  constructor() {
+    super();
+    this.state = {
+      // Hands
+      leftPresent: false, rightPresent: false,
+      leftLandmarks: null, rightLandmarks: null,
+      // Left hand → root
+      leftGesture: null, currentRoot: 'C',
+      gestureBuffer: [], lastRootChangeTime: 0,
+      // Right hand → wheel
+      wristPos: { x:0.5, y:0.5 },
+      indexTipPos: { x:0.5, y:0.4 },
+      wheelAngle: 0, wheelDistance: 0,
+      activeSector: -1, dwellStartTime: 0, dwellProgress: 0,
+      lockedSector: -1,
+      currentType: 'maj7',
+      currentOctave: 0,
+      // Calibration
+      calPhase: 'idle', // idle|fist|open|done
+      calProgress: 0,
+      fingerThresholds: null, // per-finger {lo,hi,mid}
+      // Audio
+      currentVelocity: 0.7,
+      // Modes
+      singleHandMode: false,
+      missingHandBehavior: 'mute', // 'sustain' | 'mute'
+      // Hand lost
+      handLostStart: null,
+      isHandLost: false,
+      // Performance
+      fps: 60, complexity: 'high',
+      // Recording
+      recording: false, playbackActive: false,
+      recordedEvents: [],
+      // Stage
+      stage: 'splash', // splash|calibrating|active
+    };
+  }
+  get(k) { return this.state[k]; }
+  set(k, v) {
+    const old = this.state[k];
+    this.state[k] = v;
+    if (old !== v) this.emit(k, { old, new:v });
+    this.emit('change', { key:k, old, new:v });
+  }
+  update(partial) {
+    for (const [k,v] of Object.entries(partial)) this.set(k, v);
+  }
+}
+
+// ================================================================
+// SECTION 4: CAMERA MANAGER
+// ================================================================
+class CameraManager {
+  constructor(videoEl) {
+    this.video = videoEl;
+    this.stream = null;
+    this.lastError = null;
+  }
+  async start(width=640, height=480) {
+    if (window.location.protocol === 'file:') {
+      this.lastError = 'Cannot access camera from file:// - use a local server (npx serve .)';
+      return null;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      this.lastError = 'Your browser does not support camera access (need HTTPS or localhost)';
+      return null;
+    }
+    try {
+      // Simplest possible camera request first
+      console.log('[Camera] Requesting camera...');
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' }
+      });
+      console.log('[Camera] Stream obtained:', this.stream.getVideoTracks()[0]?.label);
+      this.video.srcObject = this.stream;
+      await this.video.play();
+      console.log('[Camera] Video playing:', this.video.videoWidth, 'x', this.video.videoHeight);
+      this.lastError = null;
+      return { w: this.video.videoWidth, h: this.video.videoHeight };
+    } catch(e) {
+      const errMsg = e.message || e.name || 'Unknown error';
+      console.error('[Camera] Error:', e.name, e.message);
+      if (e.name === 'NotAllowedError') {
+        this.lastError = 'Camera permission denied. Check: 1) Click "Allow" in browser prompt 2) Windows Settings → Privacy → Camera → ON';
+      } else if (e.name === 'NotFoundError') {
+        this.lastError = 'No camera found on this device';
+      } else if (e.name === 'NotReadableError') {
+        this.lastError = 'Camera is in use by another app — close other apps and try again';
+      } else {
+        this.lastError = errMsg;
+      }
+      return null;
+    }
+  }
+  stop() {
+    if (this.stream) { this.stream.getTracks().forEach(t=>t.stop()); this.stream=null; }
+  }
+}
+
+// ================================================================
+// SECTION 5: HAND TRACKER (MediaPipe)
+// ================================================================
+class HandTracker {
+  constructor() {
+    this.handLandmarker = null;
+    this.lastResult = null;
+    this.progressCb = null;
+  }
+  async load(onProgress) {
+    this.progressCb = onProgress;
+    if (!FilesetResolver || !HandLandmarker) {
+      console.warn('[HandTracker] MediaPipe not available — skipping model load');
+      throw new Error('MediaPipe module not available');
+    }
+    if (onProgress) onProgress(5);
+
+    // WASM directory URLs with CDN fallbacks (including China mirror)
+    const wasmDirs = [
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm',
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm',
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18',
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision',
+    ];
+    // Model URLs — try remote, then local file
+    const modelUrls = [
+      'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+      './hand_landmarker.task',
+    ];
+
+    let vision = null;
+    for (const dir of wasmDirs) {
+      try {
+        console.log('[HandTracker] Loading WASM from:', dir);
+        vision = await FilesetResolver.forVisionTasks(dir);
+        console.log('[HandTracker] WASM loaded successfully');
+        break;
+      } catch(e) {
+        console.warn('[HandTracker] WASM failed for', dir, ':', e.message);
+      }
+    }
+    if (!vision) throw new Error('Cannot load MediaPipe WASM from any CDN. Check internet connection.');
+
+    if (onProgress) onProgress(40);
+
+    let lastErr = null;
+    for (const modelUrl of modelUrls) {
+      for (const delegate of ['GPU', 'CPU']) {
+        try {
+          console.log('[HandTracker] Creating with', delegate, 'model:', modelUrl);
+          this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+            baseOptions: { modelAssetPath: modelUrl, delegate },
+            runningMode: 'VIDEO',
+            numHands: 2,
+          });
+          console.log('[HandTracker] HandLandmarker ready with', delegate);
+          if (onProgress) onProgress(100);
+          return;
+        } catch(e) {
+          console.warn('[HandTracker]', delegate, 'failed:', e.message);
+          lastErr = e;
+        }
+      }
+    }
+    throw lastErr || new Error('HandLandmarker creation failed');
+  }
+  detect(videoEl, timestamp) {
+    if (!this.handLandmarker) return null;
+    try {
+      this.lastResult = this.handLandmarker.detectForVideo(videoEl, timestamp);
+    } catch(e) {
+      // occasional WASM errors, ignore silently
+    }
+    return this.lastResult;
+  }
+}
+
+// ================================================================
+// SECTION 6: GESTURE RECOGNIZER (Left Hand)
+// ================================================================
+class GestureRecognizer {
+  constructor(state) { this.state = state; }
+
+  // Compute finger extension metrics (unnormalized)
+  fingerMetrics(landmarks) {
+    const metrics = [];
+    for (const f of FINGERS) {
+      const tip = landmarks[f.tip];
+      const pip = landmarks[f.pip];
+      const mcp = landmarks[f.mcp];
+      // Y-diff: positive when tip is above pip (extended upward)
+      const yDiff = pip.y - tip.y;
+      // Also use distance from mcp
+      const distMCP = dist2d(tip.x, tip.y, mcp.x, mcp.y);
+      metrics.push({ name:f.name, yDiff, distMCP, tip, pip, mcp });
+    }
+    return metrics;
+  }
+
+  // Check if a finger is extended using calibrated thresholds
+  isExtended(metric, fingerName) {
+    const thresh = this.state.get('fingerThresholds');
+    if (!thresh || !thresh[fingerName]) {
+      // Default thresholds (normalized coords ~0-1)
+      const defaults = { thumb:0.03, index:0.04, middle:0.04, ring:0.03, pinky:0.03 };
+      return metric.yDiff > (defaults[fingerName] || 0.04);
+    }
+    const t = thresh[fingerName];
+    // Normalize: if yDiff > mid threshold, it's extended
+    return metric.yDiff > t.mid;
+  }
+
+  // Thumb uses different heuristic: distance from thumb tip to pinky MCP
+  isThumbExtended(landmarks) {
+    const thumbTip = landmarks[4];
+    const pinkyMCP = landmarks[17];
+    const d = dist2d(thumbTip.x, thumbTip.y, pinkyMCP.x, pinkyMCP.y);
+    const thresh = this.state.get('fingerThresholds');
+    if (thresh && thresh.thumb) return d > thresh.thumb.mid;
+    return d > 0.25; // default threshold
+  }
+
+  // Classify gesture from landmarks
+  classify(landmarks) {
+    const metrics = this.fingerMetrics(landmarks);
+    // Fingers 2-5: index, middle, ring, pinky
+    const ext = {};
+    for (const m of metrics) {
+      if (m.name === 'thumb') {
+        ext.thumb = this.isThumbExtended(landmarks);
+      } else {
+        ext[m.name] = this.isExtended(m, m.name);
+      }
+    }
+    // Build gesture bitmask: thumb,index,middle,ring,pinky
+    const bm = (ext.thumb?0b10000:0) | (ext.index?0b00001:0) |
+               (ext.middle?0b00010:0) | (ext.ring?0b00100:0) |
+               (ext.pinky?0b01000:0);
+
+    const gestureMap = {
+      0b00001: 'index_only',      0b00011: 'index_middle',
+      0b00111: 'index_middle_ring', 0b01111: 'four_fingers',
+      0b11111: 'all_five',        0b10000: 'thumb_only',
+      0b11000: 'thumb_pinky',
+    };
+    return { gesture: gestureMap[bm] || null, extensions: ext, bitmask: bm };
+  }
+
+  // Process left hand frame
+  process(leftLandmarks) {
+    if (!leftLandmarks) {
+      this.state.set('leftGesture', null);
+      return null;
+    }
+    const { gesture } = this.classify(leftLandmarks);
+    const buffer = [...this.state.get('gestureBuffer'), gesture];
+    if (buffer.length > CONFIG.debounceFrames) buffer.shift();
+    this.state.set('gestureBuffer', buffer);
+    this.state.set('leftGesture', gesture);
+
+    // Check debounce: all entries must match
+    if (buffer.length >= CONFIG.debounceFrames && buffer.every(g=>g===gesture) && gesture) {
+      const lastTime = this.state.get('lastRootChangeTime');
+      if (now() - lastTime >= CONFIG.cooldownMs) {
+        const root = GESTURE_ROOTS[gesture];
+        if (root && root !== this.state.get('currentRoot')) {
+          this.state.set('lastRootChangeTime', now());
+          this.state.set('currentRoot', root);
+          return { type:'rootChange', root, gesture };
+        }
+      }
+    }
+    return null;
+  }
+
+  // Map left wrist/fingertip Y to velocity (top=1.0, bottom=0.3)
+  computeVelocity(landmarks) {
+    if (!landmarks) return 0.7;
+    // Use index fingertip Y (normalized 0-1, 0=top)
+    const tipY = landmarks[8]?.y ?? 0.5;
+    // Invert: top (small Y) = high velocity
+    return clamp(1.0 - tipY * 0.7, CONFIG.velocityMin, CONFIG.velocityMax);
+  }
+}
+
+// ================================================================
+// SECTION 7: CHORD WHEEL DETECTOR (Right Hand)
+// ================================================================
+class ChordWheelDetector {
+  constructor(state) { this.state = state; }
+
+  process(rightLandmarks, canvasW, canvasH) {
+    if (!rightLandmarks) {
+      this.state.update({ activeSector:-1, dwellStartTime:0, dwellProgress:0 });
+      return null;
+    }
+
+    // Wrist = landmark 0, Index tip = landmark 8
+    const wrist = rightLandmarks[0];
+    const idxTip = rightLandmarks[8];
+
+    // Mirror X for canvas coordinates
+    const wx = (1-wrist.x) * canvasW;
+    const wy = wrist.y * canvasH;
+    const ix = (1-idxTip.x) * canvasW;
+    const iy = idxTip.y * canvasH;
+
+    this.state.update({ wristPos:{x:wx,y:wy}, indexTipPos:{x:ix,y:iy} });
+
+    // Distance from wrist to index tip
+    const dx = ix - wx, dy = iy - wy;
+    const dist = Math.hypot(dx, dy);
+
+    // Octave always high (locked)
+    this.state.set('currentOctave', 0);
+
+    // Check if index tip is within wheel
+    if (dist < 15 || dist > CONFIG.wheelRadius) {
+      this.state.update({ activeSector:-1, dwellStartTime:0, dwellProgress:0, wheelDistance:dist });
+      return null;
+    }
+
+    // Compute angle (0 = upward, clockwise)
+    let angle = Math.atan2(dx, -dy); // atan2(x, -y) for clockwise from top
+    if (angle < 0) angle += Math.PI*2;
+
+    const sectorAngle = (Math.PI*2) / 6;
+    const rawSector = Math.floor(angle / sectorAngle);
+    // Order sectors starting from top, clockwise: maj7,min7,7,maj,min,add9
+
+    // Hysteresis: fingertip must be at least hysteresisPx into a new sector to register
+    const angleInSector = angle - rawSector*sectorAngle;
+    const angleMargin = Math.atan2(CONFIG.hysteresisPx, Math.max(dist, 30));
+    const nearBoundary = angleInSector < angleMargin || angleInSector > sectorAngle - angleMargin;
+
+    const prevSector = this.state.get('activeSector');
+    let sectorIdx = rawSector;
+
+    // If near boundary and in a different raw sector, stay in previous sector
+    if (nearBoundary && prevSector >= 0 && rawSector !== prevSector) {
+      sectorIdx = prevSector;
+    }
+
+    this.state.set('wheelDistance', dist);
+    this.state.set('wheelAngle', angle);
+
+    // Instant trigger — no dwell wait
+    if (sectorIdx !== prevSector) {
+      this.state.update({ activeSector:sectorIdx, dwellStartTime:now(), dwellProgress:1, lockedSector:sectorIdx });
+      const chordType = CHORD_TYPES[sectorIdx];
+      if (chordType && chordType !== this.state.get('currentType')) {
+        this.state.set('currentType', chordType);
+        if (navigator.vibrate) navigator.vibrate(10);
+        return { type:'chordTypeChange', chordType, sector:sectorIdx, isNewLock:true };
+      }
+    }
+
+    return null;
+  }
+}
+
+// ================================================================
+// SECTION 8: AUDIO ENGINE (Tone.js)
+// ================================================================
+class AudioEngine {
+  constructor(state) {
+    this.state = state;
+    this.activeBank = 'A';
+    this.synths = {};
+    this.gains = {};
+    this.masterGain = null;
+    this.reverb = null;
+    this.lowpass = null;
+    this.ready = false;
+  }
+
+  // Convert MIDI number to note name like "C4", "Eb3"
+  midiToNote(midi) {
+    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    const oct = Math.floor(midi / 12) - 1;
+    const name = names[midi % 12];
+    return name + oct;
+  }
+
+  async init() {
+    console.log('[Audio] Starting Tone.js...');
+    await Tone.start();
+    console.log('[Audio] Tone.js started, AudioContext:', Tone.getContext().state);
+
+    // ---- Piano: clean triangle + sine, percussive envelope, light reverb ----
+    this.masterGain = new Tone.Gain(0.6).toDestination();
+
+    this.reverb = new Tone.Reverb({ decay: 1.2, wet: 0.2 });
+    this.reverb.connect(this.masterGain);
+    await this.reverb.generate();
+
+    // Layer configs — smooth legato pad (no percussive attack)
+    const layers = [
+      { // Main body: soft attack for seamless chord transitions
+        name: 'strings',
+        vol: -8,
+        osc: { type: 'triangle' },
+        env: { attack: 0.12, decay: 0.6, sustain: 0.5, release: 0.8 }
+      },
+      { // Gentle harmonic layer
+        name: 'sub',
+        vol: -14,
+        osc: { type: 'sine' },
+        env: { attack: 0.1, decay: 0.5, sustain: 0.4, release: 0.6 }
+      },
+    ];
+
+    for (const layer of layers) {
+      // Bank A — active (gain = 1)
+      const synthA = new Tone.PolySynth();
+      synthA.set({ oscillator: layer.osc, envelope: layer.env, volume: layer.vol });
+      const gainA = new Tone.Gain(1);
+      synthA.connect(gainA);
+      gainA.connect(this.reverb);
+
+      // Bank B — standby (gain = 0)
+      const synthB = new Tone.PolySynth();
+      synthB.set({ oscillator: layer.osc, envelope: layer.env, volume: layer.vol });
+      const gainB = new Tone.Gain(0);
+      synthB.connect(gainB);
+      gainB.connect(this.reverb);
+
+      this.synths[`${layer.name}_A`] = synthA;
+      this.synths[`${layer.name}_B`] = synthB;
+      this.gains[`${layer.name}_A`] = gainA;
+      this.gains[`${layer.name}_B`] = gainB;
+    }
+
+    this.ready = true;
+    console.log('[Audio] Engine ready — 4 synths (2 layers × 2 banks)');
+  }
+
+  // Compute note names from root + chord type + octave
+  getNotes(root, type, octaveShift) {
+    const baseMIDI = ROOT_MIDI[root] ?? 48;
+    const rootMIDI = baseMIDI + (octaveShift * 12);
+    const intervals = CHORD_INTERVALS[type] || [0,4,7];
+    return intervals.map(i => this.midiToNote(rootMIDI + i));
+  }
+
+  // Trigger chord change with A/B crossfade
+  triggerChord(root, type, octaveShift, velocity) {
+    if (!this.ready) {
+      console.warn('[Audio] Not ready, skipping trigger');
+      return;
+    }
+
+    const notes = this.getNotes(root, type, octaveShift);
+    const subNotes = notes.map(n => {
+      // Drop an octave: parse note name, subtract 12 from MIDI
+      const midi = Tone.Frequency(n).toMidi();
+      return this.midiToNote(midi - 12);
+    });
+
+    const inactive = this.activeBank === 'A' ? 'B' : 'A';
+    const active = this.activeBank;
+    const layerNames = ['strings','sub'];
+    const noteSets = [notes, subNotes];
+
+    console.log('[Audio] Chord:', root, type, 'oct:', octaveShift, 'notes:', notes.join(' '));
+
+    // Trigger notes on inactive bank
+    for (let i = 0; i < layerNames.length; i++) {
+      const synth = this.synths[`${layerNames[i]}_${inactive}`];
+      try {
+        synth.triggerAttack(noteSets[i], undefined, velocity);
+      } catch(e) {
+        console.error('[Audio] triggerAttack failed:', e);
+      }
+    }
+
+    // Crossfade
+    const fadeTime = CONFIG.crossfadeMs;
+    for (const ln of layerNames) {
+      this.gains[`${ln}_${active}`].gain.rampTo(0, fadeTime);
+      this.gains[`${ln}_${inactive}`].gain.rampTo(1, fadeTime);
+    }
+
+    // After crossfade, release old bank
+    setTimeout(() => {
+      for (let i = 0; i < layerNames.length; i++) {
+        try {
+          this.synths[`${layerNames[i]}_${active}`].releaseAll();
+        } catch(e) { /* ignore */ }
+      }
+      this.activeBank = inactive;
+    }, fadeTime * 1000 + 20);
+  }
+
+  silence() {
+    if (!this.ready) return;
+    for (const key of Object.keys(this.synths)) {
+      try { this.synths[key].releaseAll(); } catch(e) { /* ignore */ }
+    }
+    for (const key of Object.keys(this.gains)) {
+      const isA = key.endsWith('_A');
+      this.gains[key].gain.value = isA ? (this.activeBank==='A'?1:0) : (this.activeBank==='B'?1:0);
+    }
+  }
+
+  fadeOut(duration) {
+    if (this.masterGain) this.masterGain.gain.rampTo(0, duration);
+  }
+
+  fadeIn(duration) {
+    if (this.masterGain) this.masterGain.gain.rampTo(0.6, duration);
+  }
+}
+
+// ================================================================
+// SECTION 9: PARTICLE SYSTEM
+// ================================================================
+class ParticleSystem {
+  constructor() { this.particles = []; this.maxParticles = 120; }
+
+  burst(x, y, colorRgb, count=18) {
+    for (let i=0; i<count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 4;
+      this.particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 0.5 + Math.random() * 0.8,
+        maxLife: 0.5 + Math.random() * 0.8,
+        color: colorRgb,
+        size: 2 + Math.random() * 4,
+      });
+    }
+    // Cap
+    while (this.particles.length > this.maxParticles) this.particles.shift();
+  }
+
+  update(dt) {
+    for (let i=this.particles.length-1; i>=0; i--) {
+      const p = this.particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+      p.life -= dt;
+      if (p.life <= 0) this.particles.splice(i,1);
+    }
+  }
+
+  draw(ctx) {
+    for (const p of this.particles) {
+      const alpha = (p.life / p.maxLife) * 0.8;
+      const sz = p.size * (p.life / p.maxLife);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, sz, 0, Math.PI*2);
+      ctx.fillStyle = rgbToCss(p.color[0], p.color[1], p.color[2], alpha);
+      ctx.fill();
+    }
+  }
+
+  clear() { this.particles = []; }
+}
+
+// ================================================================
+// SECTION 10: CANVAS RENDERER
+// ================================================================
+class CanvasRenderer {
+  constructor(canvasEl, state) {
+    this.canvas = canvasEl;
+    this.ctx = canvasEl.getContext('2d');
+    this.state = state;
+    this.particles = new ParticleSystem();
+    this.wheelScale = 1;
+    this.wheelScaleTime = 0;
+    this.chordColorRgb = CHORD_COLORS['maj7'].rgb;
+    this.targetColorRgb = CHORD_COLORS['maj7'].rgb;
+    this.colorLerp = 0;
+  }
+
+  resize(w, h) {
+    this.canvas.width = w;
+    this.canvas.height = h;
+  }
+
+  triggerRootParticles(x, y) {
+    const clr = this.state.get('currentType');
+    const rgb = CHORD_COLORS[clr]?.rgb || [255,140,66];
+    this.particles.burst(x, y, rgb, CONFIG.particleCount);
+  }
+
+  triggerTypeParticles(x, y) {
+    const clr = this.state.get('currentType');
+    const rgb = CHORD_COLORS[clr]?.rgb || [255,140,66];
+    this.particles.burst(x, y, rgb, CONFIG.particleCount);
+    // wheel scale animation
+    this.wheelScale = 1.15;
+    this.wheelScaleTime = 0.1;
+  }
+
+  setChordColor(type) {
+    this.targetColorRgb = CHORD_COLORS[type]?.rgb || [255,255,255];
+    this.colorLerp = 0;
+  }
+
+  draw(landmarksData, complexity) {
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const dt = 1/60;
+    const st = this.state;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // ---- Vignette ----
+    if (complexity !== 'low') {
+      const cx=w/2, cy=h/2, r=Math.hypot(w,h)*0.55;
+      const grad = ctx.createRadialGradient(cx, cy, r*0.35, cx, cy, r);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(0.5, 'rgba(0,0,0,0.15)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.7)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // ---- Color interpolation (smooth 2s transition) ----
+    if (this.colorLerp < 1) {
+      this.colorLerp = Math.min(1, this.colorLerp + dt * 0.5);
+    }
+    const c = this.chordColorRgb;
+    const t = this.targetColorRgb;
+    const blend = this.colorLerp;
+    this.chordColorRgb = [
+      Math.round(lerp(c[0], t[0], blend)),
+      Math.round(lerp(c[1], t[1], blend)),
+      Math.round(lerp(c[2], t[2], blend)),
+    ];
+
+    // ---- Update particles ----
+    this.particles.update(dt);
+
+    // ---- Draw skeletons ----
+    const hands = [];
+    if (landmarksData.left) hands.push({ lm:landmarksData.left, label:'L' });
+    if (landmarksData.right) hands.push({ lm:landmarksData.right, label:'R' });
+
+    for (const hand of hands) {
+      const lm = hand.lm;
+      // Mirror X for canvas
+      const pts = lm.map(l=>({x:(1-l.x)*w, y:l.y*h}));
+
+      // Connections
+      ctx.strokeStyle = hand.label==='L'
+        ? rgbToCss(...this.chordColorRgb, 0.55)
+        : 'rgba(255,255,255,0.45)';
+      ctx.lineWidth = hand.label==='L' ? 2.2 : 1.8;
+      ctx.beginPath();
+      for (const [a,b] of HAND_CONNECTIONS) {
+        ctx.moveTo(pts[a].x, pts[a].y);
+        ctx.lineTo(pts[b].x, pts[b].y);
+      }
+      ctx.stroke();
+
+      // Landmarks
+      for (let i=0; i<pts.length; i++) {
+        const isTip = [4,8,12,16,20].includes(i);
+        ctx.beginPath();
+        ctx.arc(pts[i].x, pts[i].y, isTip?4.5:2.8, 0, Math.PI*2);
+        ctx.fillStyle = hand.label==='L'
+          ? rgbToCss(...this.chordColorRgb, isTip?0.9:0.5)
+          : `rgba(255,255,255,${isTip?0.85:0.45})`;
+        ctx.fill();
+      }
+    }
+
+    // ---- Draw chord wheel (right hand) ----
+    const wristP = st.get('wristPos');
+    const idxP = st.get('indexTipPos');
+    const activeSector = st.get('activeSector');
+    const lockedSector = st.get('lockedSector');
+    const dwellProgress = st.get('dwellProgress');
+    const wheelAngle = st.get('wheelAngle');
+    const wheelDist = st.get('wheelDistance');
+
+    if (st.get('rightPresent')) {
+      const wx = wristP.x, wy = wristP.y;
+      const r = CONFIG.wheelRadius * this.wheelScale;
+
+      // Wheel scale animation
+      if (this.wheelScaleTime > 0) {
+        this.wheelScaleTime -= dt;
+        this.wheelScale = lerp(this.wheelScale, 1, 0.15);
+      }
+
+      ctx.save();
+      ctx.translate(wx, wy);
+
+      // Outer ring
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Sectors
+      const sectorAngle = (Math.PI*2)/6;
+      for (let i=0; i<6; i++) {
+        const startA = -Math.PI/2 + i*sectorAngle;
+        const endA = startA + sectorAngle;
+        const chordType = CHORD_TYPES[i];
+        const colorRgb = CHORD_COLORS[chordType].rgb;
+        const isActive = (activeSector===i);
+        const isLocked = (lockedSector===i);
+
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.arc(0, 0, r, startA, endA);
+        ctx.closePath();
+        ctx.fillStyle = isLocked
+          ? rgbToCss(...colorRgb, 0.5)
+          : isActive
+            ? rgbToCss(...colorRgb, 0.25 + dwellProgress*0.25)
+            : rgbToCss(...colorRgb, 0.12);
+        ctx.fill();
+
+        // Glow on locked sector
+        if (isLocked) {
+          ctx.shadowColor = rgbToCss(...colorRgb, 0.7);
+          ctx.shadowBlur = 18;
+          ctx.strokeStyle = rgbToCss(...colorRgb, 0.9);
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+
+        // Sector border
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.arc(0, 0, r, startA, endA);
+        ctx.closePath();
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Label
+        const midA = startA + sectorAngle/2;
+        const lx = Math.cos(midA) * r * 0.62;
+        const ly = Math.sin(midA) * r * 0.62;
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(CHORD_LABELS[chordType], lx, ly);
+      }
+
+      // Dwell progress arc
+      if (activeSector >= 0 && dwellProgress > 0) {
+        const startA = -Math.PI/2 + activeSector*sectorAngle;
+        const sweepA = sectorAngle * dwellProgress;
+        ctx.beginPath();
+        ctx.arc(0, 0, r+6, startA, startA + sweepA);
+        ctx.strokeStyle = rgbToCss(...this.chordColorRgb, 0.9);
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+      }
+
+      // Angle indicator line (wrist to index finger direction)
+      if (wheelDist > 10) {
+        const ax = Math.cos(wheelAngle - Math.PI/2) * Math.min(wheelDist, r);
+        const ay = Math.sin(wheelAngle - Math.PI/2) * Math.min(wheelDist, r);
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.lineTo(ax, ay);
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+
+        // Dot at fingertip
+        ctx.beginPath();
+        ctx.arc(ax, ay, 4, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.fill();
+      }
+
+      // Center dot
+      ctx.beginPath();
+      ctx.arc(0, 0, 5, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fill();
+
+      // Octave indicator (small bar on the right of wheel)
+      const oct = st.get('currentOctave');
+      const barX = r + 16;
+      for (let oi=-1; oi<=1; oi++) {
+        const by = oi * -10;
+        ctx.fillStyle = oct===oi ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.2)';
+        ctx.fillRect(barX-2, by-2, 6, 4);
+      }
+      // Octave label
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(oct>0?'+8ve':oct<0?'-8ve':'mid', barX+6, 3);
+
+      ctx.restore();
+    }
+
+    // ---- Draw particles ----
+    if (complexity !== 'low') {
+      this.particles.draw(ctx);
+    }
+
+    // ---- Chord name on canvas (bottom center) ----
+    const type = st.get('currentType');
+    const root = st.get('currentRoot');
+    const oct = st.get('currentOctave');
+    const displayName = `${root}${type}`;
+
+    ctx.textAlign = 'center';
+    ctx.font = `bold ${Math.round(w*0.06)}px "Segoe UI","Helvetica Neue",sans-serif`;
+    ctx.shadowColor = rgbToCss(...this.chordColorRgb, 0.8);
+    ctx.shadowBlur = 24;
+    ctx.fillStyle = rgbToCss(...this.chordColorRgb, 0.95);
+    ctx.fillText(displayName, w/2, h-50);
+    ctx.shadowBlur = 0;
+
+    // ---- FPS ----
+    ctx.textAlign = 'right';
+    ctx.font = '11px monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillText(`${st.get('fps')} fps`, w-14, 22);
+  }
+}
+
+// ================================================================
+// SECTION 11: RECORDER
+// ================================================================
+class Recorder {
+  constructor(state) {
+    this.state = state;
+    this.startTime = 0;
+    this.events = [];
+    this.playbackTimer = null;
+    this.playbackIdx = 0;
+    this.playbackStart = 0;
+    this.playbackEvents = [];
+    this.playbackAudio = null;
+  }
+
+  start() {
+    this.events = [];
+    this.startTime = Tone.now();
+    this.state.set('recording', true);
+    this.state.set('recordedEvents', []);
+  }
+
+  recordEvent(root, type, octave) {
+    if (!this.state.get('recording')) return;
+    this.events.push({
+      t: Tone.now() - this.startTime,
+      root, type, octave
+    });
+    this.state.set('recordedEvents', [...this.events]);
+  }
+
+  stop() {
+    this.state.set('recording', false);
+    this.state.set('recordedEvents', [...this.events]);
+    return this.events;
+  }
+
+  startPlayback(audioEngine) {
+    if (this.events.length === 0) return;
+    this.stopPlayback();
+    this.state.set('playbackActive', true);
+    this.playbackIdx = 0;
+    this.playbackStart = Tone.now();
+    this.playbackEvents = [...this.events];
+    this.playbackAudio = audioEngine;
+    this._scheduleNextPlayback();
+  }
+
+  _scheduleNextPlayback() {
+    if (!this.state.get('playbackActive')) return;
+    if (this.playbackIdx >= this.playbackEvents.length) {
+      // Loop back
+      this.playbackIdx = 0;
+      this.playbackStart = Tone.now();
+    }
+    if (this.playbackEvents.length === 0) return;
+
+    const ev = this.playbackEvents[this.playbackIdx];
+    const targetTime = this.playbackStart + ev.t;
+    const waitMs = Math.max(0, (targetTime - Tone.now()) * 1000);
+
+    this.playbackTimer = setTimeout(() => {
+      if (!this.state.get('playbackActive')) return;
+      this.playbackAudio.triggerChord(ev.root, ev.type, ev.octave, 0.7);
+      this.state.set('currentRoot', ev.root);
+      this.state.set('currentType', ev.type);
+      this.state.set('currentOctave', ev.octave);
+      this.playbackIdx++;
+      this._scheduleNextPlayback();
+    }, waitMs);
+  }
+
+  stopPlayback() {
+    this.state.set('playbackActive', false);
+    if (this.playbackTimer) {
+      clearTimeout(this.playbackTimer);
+      this.playbackTimer = null;
+    }
+  }
+
+  serialize() {
+    if (this.events.length === 0) return '';
+    const compact = this.events.map(e => ({
+      t: Math.round(e.t*1000),
+      r: ROOT_NOTES.indexOf(e.root),
+      c: CHORD_TYPES.indexOf(e.type),
+      o: e.octave
+    }));
+    return btoa(JSON.stringify(compact));
+  }
+
+  deserialize(str) {
+    try {
+      const compact = JSON.parse(atob(str));
+      this.events = compact.map(e => ({
+        t: e.t/1000,
+        root: ROOT_NOTES[e.r],
+        type: CHORD_TYPES[e.c],
+        octave: e.o||0
+      }));
+      return this.events;
+    } catch(e) {
+      return [];
+    }
+  }
+}
+
+// ================================================================
+// SECTION 12: WAVE GESTURE DETECTOR (Right hand left-wave for mode toggle)
+// ================================================================
+class WaveDetector {
+  constructor() {
+    this.wristHistory = [];
+    this.lastToggle = 0;
+  }
+  process(wristX) {
+    const t = now();
+    this.wristHistory.push({x:wristX, t});
+    // Keep last 500ms
+    while (this.wristHistory.length>1 && t-this.wristHistory[0].t>500) this.wristHistory.shift();
+    // Check for rapid leftward movement
+    if (this.wristHistory.length >= 5) {
+      const first = this.wristHistory[0];
+      const last = this.wristHistory[this.wristHistory.length-1];
+      const dx = first.x - last.x; // positive = moved left
+      const dt = (last.t - first.t)/1000;
+      if (dx > 0.12 && dt > 0.1 && dt < 0.6 && t-this.lastToggle > 1500) {
+        this.lastToggle = t;
+        this.wristHistory = [];
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+// ================================================================
+// SECTION 13: APP CONTROLLER
+// ================================================================
+class App {
+  constructor() {
+    this.state = new StateManager();
+    this.camera = new CameraManager(document.getElementById('video'));
+    this.handTracker = new HandTracker();
+    this.gestureRec = new GestureRecognizer(this.state);
+    this.wheelDetector = new ChordWheelDetector(this.state);
+    this.audio = new AudioEngine(this.state);
+    this.renderer = new CanvasRenderer(document.getElementById('canvas'), this.state);
+    this.recorder = new Recorder(this.state);
+    this.waveDetector = new WaveDetector();
+
+    this.canvas = document.getElementById('canvas');
+    this.video = document.getElementById('video');
+    this.animFrameId = null;
+    this.lastFrameTime = 0;
+    this.fpsTimes = [];
+    this.handLostTimer = null;
+    this.handsEverDetected = false;
+    this.complexity = 'high';
+    this._muted = false;
+
+    this._setupUI();
+    this._setupKeyboard();
+    this._setupMouse();
+  }
+
+  // ---- UI Setup ----
+  _setupUI() {
+    const splash = document.getElementById('splash');
+    const btnStart = document.getElementById('btn-start');
+    const progressFill = document.getElementById('progress-fill');
+    const loaderText = document.getElementById('loader-text');
+    const calOverlay = document.getElementById('calibrate-overlay');
+    const calTitle = document.getElementById('cal-title');
+    const calHint = document.getElementById('cal-hint');
+    const calProgress = document.getElementById('cal-progress-fill');
+    const chordDisplay = document.getElementById('chord-display');
+    const handLostGuide = document.getElementById('hand-lost-guide');
+    const fpsCounter = document.getElementById('fps-counter');
+
+    // Start button
+    btnStart.addEventListener('click', async () => {
+      await this.start(false);
+    });
+
+    // Skip camera button
+    const btnSkip = document.getElementById('btn-skip');
+    btnSkip.addEventListener('click', async () => {
+      btnSkip.textContent = 'Starting...';
+      await this.start(true);
+    });
+
+    // Store refs
+    this.ui = { splash, btnStart, btnSkip, progressFill, loaderText, calOverlay, calTitle, calHint, calProgress, chordDisplay, handLostGuide, fpsCounter };
+
+    // Mute button
+    document.getElementById('btn-mute').addEventListener('click', ()=>{
+      const btn = document.getElementById('btn-mute');
+      if (this._muted) {
+        this._muted = false;
+        this.audio.masterGain.gain.rampTo(0.6, 0.1);
+        btn.textContent = '🔊 Mute';
+        btn.classList.remove('active');
+      } else {
+        this._muted = true;
+        this.audio.masterGain.gain.rampTo(0, 0.05);
+        btn.textContent = '🔇 Unmute';
+        btn.classList.add('active');
+      }
+    });
+
+    // Control buttons
+    document.getElementById('btn-single-hand').addEventListener('click', ()=>{
+      const cur = this.state.get('singleHandMode');
+      this.state.set('singleHandMode', !cur);
+      document.getElementById('btn-single-hand').classList.toggle('active', !cur);
+    });
+    document.getElementById('btn-hand-mode').addEventListener('click', ()=>{
+      const cur = this.state.get('missingHandBehavior');
+      const next = cur==='sustain'?'mute':'sustain';
+      this.state.set('missingHandBehavior', next);
+      document.getElementById('btn-hand-mode').textContent = next==='sustain'?'🔊 Sustain on Loss':'🔇 Mute on Loss';
+    });
+    document.getElementById('btn-record').addEventListener('click', ()=>{
+      if (this.state.get('recording')) {
+        this.recorder.stop();
+        document.getElementById('btn-record').classList.remove('recording');
+        document.getElementById('btn-record').textContent = '⏺ Record';
+      } else {
+        this.recorder.start();
+        document.getElementById('btn-record').classList.add('recording');
+        document.getElementById('btn-record').textContent = '⏹ Stop';
+      }
+    });
+    document.getElementById('btn-playback').addEventListener('click', ()=>{
+      if (this.state.get('playbackActive')) {
+        this.recorder.stopPlayback();
+        document.getElementById('btn-playback').classList.remove('active');
+        document.getElementById('btn-playback').textContent = '▶ Play';
+      } else {
+        this.recorder.startPlayback(this.audio);
+        document.getElementById('btn-playback').classList.add('active');
+        document.getElementById('btn-playback').textContent = '⏸ Stop';
+      }
+    });
+    document.getElementById('btn-share').addEventListener('click', ()=>{
+      const hash = this.recorder.serialize();
+      if (!hash) { alert('Record something first!'); return; }
+      const url = `${window.location.origin}${window.location.pathname}#${hash}`;
+      navigator.clipboard.writeText(url).then(()=>{
+        alert('Share URL copied to clipboard!');
+      }).catch(()=>{
+        prompt('Copy this URL to share:', url);
+      });
+    });
+
+    // State listeners
+    this.state.on('currentRoot', () => this._updateChordDisplay());
+    this.state.on('currentType', () => this._updateChordDisplay());
+    this.state.on('currentOctave', () => this._updateChordDisplay());
+    this.state.on('isHandLost', ({new:v}) => {
+      handLostGuide.classList.toggle('visible', v);
+    });
+    this.state.on('fps', ({new:v}) => {
+      fpsCounter.textContent = `${v} fps`;
+    });
+  }
+
+  _updateChordDisplay() {
+    const root = this.state.get('currentRoot');
+    const type = this.state.get('currentType');
+    const display = document.getElementById('chord-display');
+    display.textContent = `${root}${type}`;
+    // Update CSS color variable
+    const color = CHORD_COLORS[type]?.hex || '#FF8C42';
+    display.style.setProperty('--chord-color', color);
+    document.documentElement.style.setProperty('--chord-color', color);
+    // Also update any active buttons
+    document.querySelectorAll('.ctrl-btn.active').forEach(b=>{
+      b.style.setProperty('--chord-color', color);
+    });
+  }
+
+  // ---- Keyboard Fallback ----
+  _setupKeyboard() {
+    const keyMap = { a:'C', s:'D', d:'E', f:'F', g:'G', h:'A', j:'B' };
+    window.addEventListener('keydown', (e) => {
+      const root = keyMap[e.key.toLowerCase()];
+      if (root) {
+        this.state.set('currentRoot', root);
+        this._triggerChordFromState();
+        // Highlight key button
+        const btn = document.querySelector(`.key-btn[data-root="${root}"]`);
+        if (btn) { btn.classList.add('pressed'); setTimeout(()=>btn.classList.remove('pressed'), 150); }
+      }
+      // Number keys for chord types
+      const typeKeys = { '1':'maj7','2':'min7','3':'7','4':'maj','5':'min','6':'add9' };
+      const ct = typeKeys[e.key];
+      if (ct) {
+        this.state.set('currentType', ct);
+        this._triggerChordFromState();
+      }
+    });
+  }
+
+  // ---- Mouse Fallback (click on virtual keyboard) ----
+  _setupMouse() {
+    document.querySelectorAll('.key-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const root = btn.dataset.root;
+        if (root) {
+          this.state.set('currentRoot', root);
+          this._triggerChordFromState();
+        }
+      });
+      btn.addEventListener('mousedown', (e) => {
+        e.target.classList.add('pressed');
+      });
+      btn.addEventListener('mouseup', (e) => {
+        e.target.classList.remove('pressed');
+      });
+    });
+  }
+
+  _triggerChordFromState() {
+    const root = this.state.get('currentRoot');
+    const type = this.state.get('currentType');
+    const oct = this.state.get('currentOctave');
+    const vel = this.state.get('currentVelocity');
+    this.audio.triggerChord(root, type, oct, vel);
+    this.renderer.setChordColor(type);
+  }
+
+  // ---- Initialization ----
+  async init() {
+    // If MediaPipe module failed to load at bootstrap, skip model loading entirely
+    if (this._modelFailed) {
+      this.ui.loaderText.textContent = 'Camera disabled — keyboard mode only';
+      this.ui.btnStart.classList.add('ready');
+      return;
+    }
+
+    // Load hand tracker with timeout fallback
+    const loadTimeout = new Promise((resolve) => {
+      setTimeout(() => {
+        console.warn('[App] Model load timed out after 25s — switching to keyboard-only mode');
+        resolve('timeout');
+      }, 25000);
+    });
+
+    const loadTask = this.handTracker.load((pct) => {
+      this.ui.progressFill.style.width = pct + '%';
+      if (pct < 20) this.ui.loaderText.textContent = 'Loading WASM runtime (~8MB)…';
+      else if (pct < 60) this.ui.loaderText.textContent = 'Downloading hand model (5MB)…';
+      else if (pct < 100) this.ui.loaderText.textContent = 'Initializing…';
+      else this.ui.loaderText.textContent = 'Ready — click to start';
+    });
+
+    const result = await Promise.race([loadTask, loadTimeout]);
+    if (result === 'timeout') {
+      this.ui.loaderText.textContent = 'Camera disabled — keyboard mode only';
+      this._modelFailed = true;
+    }
+
+    // Check for shared URL
+    const hash = window.location.hash.slice(1);
+    if (hash) {
+      const events = this.recorder.deserialize(hash);
+      if (events.length > 0) {
+        this.ui.loaderText.textContent = (this._modelFailed ? 'Keyboard mode — ' : '') +
+          `Loaded shared progression (${events.length} chords)`;
+      }
+    }
+
+    if (!this._modelFailed) {
+      this.ui.loaderText.textContent = 'Ready — click to start';
+    }
+    this.ui.btnStart.classList.add('ready');
+    this.ui.btnSkip.style.display = 'block';
+  }
+
+  async start(skipCamera = false) {
+    // Hide splash immediately
+    this.ui.splash.classList.add('hidden');
+
+    // Start audio init
+    const audioPromise = this.audio.init();
+
+    let res = null;
+    const shouldTryCamera = !skipCamera && !this._modelFailed;
+    if (shouldTryCamera) {
+      res = await this.camera.start();
+      if (!res && this.camera.lastError) {
+        console.warn('[App] Camera unavailable:', this.camera.lastError);
+      }
+    }
+    const vw = this.video.videoWidth || 640;
+    const vh = this.video.videoHeight || 480;
+    this.renderer.resize(vw, vh);
+    await audioPromise;
+
+    if (res && shouldTryCamera) {
+      // Camera + model both available: run calibration
+      this.state.set('stage', 'calibrating');
+      this.state.set('calPhase', 'fist');
+      this._showCalibration();
+    } else {
+      // No camera: keyboard/mouse mode
+      this.state.set('stage', 'active');
+      this._triggerChordFromState();
+      const guideMsg = this.ui.handLostGuide.querySelector('.hand-text');
+      if (skipCamera) {
+        guideMsg.textContent = '⌨ Keyboard mode — ASDFGHJ = C-B roots, 1-6 = chord types';
+      } else if (this._modelFailed) {
+        guideMsg.textContent = '⌨ Camera model unavailable — ASDFGHJ keys for roots';
+      } else if (window.location.protocol === 'file:') {
+        guideMsg.textContent = '⚠ File:// — serve via HTTP: npx serve . then reopen';
+      } else if (this.camera.lastError) {
+        guideMsg.textContent = '⚠ ' + this.camera.lastError + ' — keyboard fallback';
+      } else {
+        guideMsg.textContent = 'No camera — keyboard mode';
+      }
+      this.ui.handLostGuide.classList.add('visible');
+    }
+
+    // Start main loop
+    this.lastFrameTime = performance.now();
+    this.loop(this.lastFrameTime);
+  }
+
+  // ---- Calibration ----
+  _showCalibration() {
+    this.ui.calOverlay.classList.add('active');
+    this.ui.calTitle.textContent = 'Make a fist ✊';
+    this.ui.calHint.textContent = 'Hold still...';
+  }
+  _hideCalibration() {
+    this.ui.calOverlay.classList.remove('active');
+  }
+
+  // ---- Main Loop ----
+  loop(timestamp) {
+    this.animFrameId = requestAnimationFrame((t)=>this.loop(t));
+
+    const dt = (timestamp - this.lastFrameTime) / 1000;
+    this.lastFrameTime = timestamp;
+
+    // FPS tracking
+    this.fpsTimes.push(timestamp);
+    while (this.fpsTimes.length > CONFIG.fpsWindow) this.fpsTimes.shift();
+    if (this.fpsTimes.length >= 2) {
+      const dur = this.fpsTimes[this.fpsTimes.length-1] - this.fpsTimes[0];
+      const fps = Math.round((this.fpsTimes.length-1) / (dur/1000));
+      this.state.set('fps', Math.min(fps, 60));
+    }
+
+    // Complexity adaptation
+    const fps = this.state.get('fps');
+    if (fps < CONFIG.fpsLowThreshold && this.complexity !== 'low') {
+      this.complexity = 'low';
+    } else if (fps > 35 && this.complexity === 'low') {
+      this.complexity = 'high';
+    }
+    this.state.set('complexity', this.complexity);
+
+    // Run hand detection
+    const result = this.handTracker.detect(this.video, timestamp);
+    const landmarks = result?.landmarks || [];
+    const handedness = result?.handedness || [];
+
+    // Separate left and right hands
+    let leftLm = null, rightLm = null;
+    for (let i=0; i<landmarks.length; i++) {
+      const cat = handedness[i]?.[0];
+      const label = cat?.categoryName;
+      if (label === 'Left') leftLm = landmarks[i];
+      else if (label === 'Right') rightLm = landmarks[i];
+    }
+
+    const leftPresent = !!leftLm;
+    const rightPresent = !!rightLm;
+    this.state.update({ leftPresent, rightPresent, leftLandmarks:leftLm, rightLandmarks:rightLm });
+
+    // ---- Calibration Logic ----
+    const calPhase = this.state.get('calPhase');
+    if (calPhase !== 'done' && calPhase !== 'idle' && leftPresent) {
+      this._runCalibration(leftLm);
+    }
+
+    // ---- Gesture Recognition (left hand → root) ----
+    if (calPhase === 'done' || calPhase === 'idle') {
+      const singleHand = this.state.get('singleHandMode');
+
+      if (singleHand) {
+        // Single-hand mode: use left (or only) hand for root via gestures
+        const hand = leftLm || rightLm;
+        if (hand) {
+          const result = this.gestureRec.process(hand);
+          if (result?.type === 'rootChange') {
+            this._onRootChange(result.root, hand);
+          }
+          // Chord type from horizontal position
+          const wristX = hand[0].x; // 0-1 normalized
+          const typeIdx = Math.floor(wristX * 6);
+          const ct = CHORD_TYPES[Math.min(typeIdx, 5)];
+          if (ct !== this.state.get('currentType')) {
+            this.state.set('currentType', ct);
+            this._onTypeChange(ct, hand);
+          }
+          // Velocity
+          const vel = this.gestureRec.computeVelocity(hand);
+          this.state.set('currentVelocity', vel);
+        }
+      } else {
+        // Dual-hand mode
+        if (leftLm) {
+          const result = this.gestureRec.process(leftLm);
+          if (result?.type === 'rootChange') {
+            this._onRootChange(result.root, leftLm);
+          }
+          const vel = this.gestureRec.computeVelocity(leftLm);
+          this.state.set('currentVelocity', vel);
+        }
+
+        // Right hand → wheel
+        if (rightLm) {
+          const w = this.canvas.width, h = this.canvas.height;
+          const wheelResult = this.wheelDetector.process(rightLm, w, h);
+          if (wheelResult?.type === 'chordTypeChange') {
+            this._onTypeChange(wheelResult.chordType, rightLm);
+          }
+
+          // Wave detection for mode toggle
+          const wristX = rightLm[0].x;
+          if (this.waveDetector.process(wristX)) {
+            const cur = this.state.get('missingHandBehavior');
+            this.state.set('missingHandBehavior', cur==='sustain'?'mute':'sustain');
+            document.getElementById('btn-hand-mode').textContent =
+              (cur==='sustain'?'🔇 Mute on Loss':'🔊 Sustain on Loss');
+          }
+        }
+      }
+    }
+
+    // ---- Hand Lost Detection ----
+    const anyHand = leftPresent || rightPresent;
+    if (anyHand) {
+      this.handsEverDetected = true;
+      if (this.state.get('isHandLost')) {
+        this.state.set('isHandLost', false);
+        this.state.set('handLostStart', null);
+        this.audio.fadeIn(CONFIG.fadeInDuration);
+      }
+      if (this.handLostTimer) { clearTimeout(this.handLostTimer); this.handLostTimer = null; }
+    } else if (this.handsEverDetected && this.state.get('stage')==='active') {
+      if (!this.handLostTimer) {
+        this.handLostTimer = setTimeout(() => {
+          this.state.set('isHandLost', true);
+          this.state.set('handLostStart', now());
+          const behavior = this.state.get('missingHandBehavior');
+          if (behavior === 'mute') {
+            this.audio.silence();
+            this.audio.fadeOut(0.1);
+          } else {
+            // Sustain: slowly fade
+            this.audio.fadeOut(CONFIG.fadeOutDuration);
+          }
+        }, CONFIG.handLostTimeout);
+      }
+    }
+
+    // ---- Record chord events (only on change) ----
+    if (this.state.get('recording')) {
+      const curRoot = this.state.get('currentRoot');
+      const curType = this.state.get('currentType');
+      const curOct = this.state.get('currentOctave');
+      if (!this._lastRecorded ||
+          this._lastRecorded.root !== curRoot ||
+          this._lastRecorded.type !== curType ||
+          this._lastRecorded.octave !== curOct) {
+        this.recorder.recordEvent(curRoot, curType, curOct);
+        this._lastRecorded = { root:curRoot, type:curType, octave:curOct };
+      }
+    } else {
+      this._lastRecorded = null;
+    }
+
+    // ---- Render ----
+    this.renderer.draw(
+      { left:leftLm, right:rightLm },
+      this.complexity
+    );
+  }
+
+  _onRootChange(root, landmarks) {
+    this._triggerChordFromState();
+    // Particles from left index tip
+    const idxTip = landmarks[8];
+    const cx = (1-idxTip.x) * this.canvas.width;
+    const cy = idxTip.y * this.canvas.height;
+    this.renderer.triggerRootParticles(cx, cy);
+  }
+
+  _onTypeChange(type, landmarks) {
+    this.renderer.setChordColor(type);
+    this._triggerChordFromState();
+    // Particles from right index tip (or left if single hand)
+    const idxTip = landmarks[8];
+    const cx = (1-idxTip.x) * this.canvas.width;
+    const cy = idxTip.y * this.canvas.height;
+    this.renderer.triggerTypeParticles(cx, cy);
+  }
+
+  _runCalibration(leftLm) {
+    const phase = this.state.get('calPhase');
+    const metrics = this.gestureRec.fingerMetrics(leftLm);
+    // Get finger Y-diff values
+    const fingerVals = {};
+    for (const m of metrics) {
+      fingerVals[m.name] = m.name==='thumb'
+        ? dist2d(leftLm[4].x, leftLm[4].y, leftLm[17].x, leftLm[17].y) // thumb: distance to pinky MCP
+        : m.yDiff;
+    }
+
+    // Accumulate samples
+    if (!this._calSamples) this._calSamples = { fist:[], open:[] };
+    this._calSamples[phase].push(fingerVals);
+
+    const needed = CONFIG.calibrationFrames;
+    const progress = Math.min(this._calSamples[phase].length / needed, 1);
+    this.ui.calProgress.style.width = (progress*100)+'%';
+    this.state.set('calProgress', progress);
+
+    if (this._calSamples[phase].length >= needed) {
+      if (phase === 'fist') {
+        this.state.set('calPhase', 'open');
+        this.ui.calTitle.textContent = 'Open hand wide 🖐️';
+        this.ui.calHint.textContent = 'Spread all fingers...';
+        this.ui.calProgress.style.width = '0%';
+      } else if (phase === 'open') {
+        // Compute thresholds
+        const thresholds = {};
+        for (const fname of ['thumb','index','middle','ring','pinky']) {
+          const fistVals = this._calSamples.fist.map(s=>s[fname]);
+          const openVals = this._calSamples.open.map(s=>s[fname]);
+          const fistAvg = fistVals.reduce((a,b)=>a+b,0)/fistVals.length;
+          const openAvg = openVals.reduce((a,b)=>a+b,0)/openVals.length;
+          const mid = (fistAvg + openAvg) / 2;
+          // Slightly bias toward detecting extension (so slightly lower threshold)
+          const lo = fistAvg + (openAvg-fistAvg)*0.3;
+          const hi = fistAvg + (openAvg-fistAvg)*0.7;
+          thresholds[fname] = { lo, hi, mid };
+        }
+        this.state.set('fingerThresholds', thresholds);
+        this.state.set('calPhase', 'done');
+        this._hideCalibration();
+        this.state.set('stage', 'active');
+        this._triggerChordFromState();
+      }
+    }
+  }
+}
+
+// ================================================================
+// SECTION 14: BOOTSTRAP
+// ================================================================
+(async () => {
+  // Step 1: Try to load MediaPipe module (dynamic import with fallbacks)
+  const mpLoaded = await loadMediaPipeModule();
+  if (!mpLoaded) {
+    console.warn('[Bootstrap] MediaPipe unavailable — entering keyboard-only mode');
+    document.getElementById('loader-text').textContent = 'Camera unavailable — keyboard mode';
+  }
+
+  // Step 2: Create and initialize the app
+  const app = new App();
+  if (!mpLoaded) app._modelFailed = true;
+
+  app.init().catch(err => {
+    console.error('Init failed:', err);
+    const loaderText = document.getElementById('loader-text');
+    loaderText.textContent = 'Error: ' + (err.message || 'Unknown');
+    loaderText.style.color = '#e04040';
+    const btnStart = document.getElementById('btn-start');
+    btnStart.classList.add('ready');
+    btnStart.textContent = 'Retry';
+    btnStart.onclick = () => location.reload();
+    const progressFill = document.getElementById('progress-fill');
+    if (progressFill) progressFill.style.background = '#e04040';
+  });
+})();
+</script>
+</body>
+</html>
