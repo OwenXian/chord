@@ -177,9 +177,9 @@ body {
 
 /* ---- Controls Bar ---- */
 #controls {
-  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-  z-index: 50; display: flex; gap: 10px; flex-wrap: wrap;
-  justify-content: center;
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  z-index: 50; display: flex; gap: 8px; flex-wrap: nowrap;
+  justify-content: center; white-space: nowrap;
 }
 .ctrl-btn {
   padding: 8px 18px; font-size: 12px; letter-spacing: 0.06em;
@@ -332,6 +332,8 @@ body {
   <button class="ctrl-btn" id="btn-single-hand">👆 Single Hand</button>
   <button class="ctrl-btn" id="btn-fixed-wheel">📍 Fix Wheel</button>
   <button class="ctrl-btn" id="btn-lock-chord">🔒 Lock Chord</button>
+  <button class="ctrl-btn" id="btn-wheel-center">🎯 Pick Center</button>
+  <button class="ctrl-btn" id="btn-swap-hands">🔄 Swap Hands</button>
   <button class="ctrl-btn" id="btn-help">❓ Help</button>
 </div>
 
@@ -449,7 +451,7 @@ const FINGERS = [
 // Wheel 1 (lower): 6 types — Wheel 2 (upper): 5 types
 const CHORD_TYPES_1 = ['maj7','min7','7','maj','min','add9'];
 const CHORD_TYPES_2 = ['sus2','sus4','dim7','aug7','aug9'];
-const CHORD_LABELS_1 = { maj7:'M7', min7:'m7', 7:'7', maj:'M', min:'m', add9:'+9' };
+const CHORD_LABELS_1 = { maj7:'Maj7', min7:'min7', 7:'7', maj:'Maj', min:'min', add9:'add9' };
 const CHORD_LABELS_2 = { sus2:'sus2', sus4:'sus4', dim7:'dim7', aug7:'aug7', aug9:'aug9' };
 const CHORD_INTERVALS = {
   maj7: [0,4,7,11], min7: [0,3,7,10], 7: [0,4,7,10],
@@ -550,6 +552,9 @@ class StateManager extends Emitter {
       currentWheel: 1,      // 1=lower wheel (6 types), 2=upper wheel (5 types)
       fixedWheel: false,
       lockChordType: false,
+      wheelCenterIdx: 0,   // selected landmark index (0-20)
+      selectCenterMode: false, // true=user picking a landmark
+      swapHands: false,
       // Calibration
       calPhase: 'idle', // idle|fist|open|done
       calProgress: 0,
@@ -833,17 +838,19 @@ class ChordWheelDetector {
       return null;
     }
 
-    const wrist = rightLandmarks[0];
+    // Center = user-selected landmark index (0-20, default 9 = middle finger MCP)
+    const cIdx = this.state.get('wheelCenterIdx');
+    const center = rightLandmarks[cIdx] || rightLandmarks[9];
     const idxTip = rightLandmarks[8];
 
-    const wx = (1-wrist.x) * canvasW;
-    const wy = wrist.y * canvasH;
+    const cx = (1-center.x) * canvasW;
+    const cy = center.y * canvasH;
     const ix = (1-idxTip.x) * canvasW;
     const iy = idxTip.y * canvasH;
 
-    this.state.update({ wristPos:{x:wx,y:wy}, indexTipPos:{x:ix,y:iy} });
+    this.state.update({ wristPos:{x:cx,y:cy}, indexTipPos:{x:ix,y:iy} });
 
-    const dx = ix - wx, dy = iy - wy;
+    const dx = ix - cx, dy = iy - cy;
     const dist = Math.hypot(dx, dy);
 
     const wheelR = Math.min(Math.min(canvasW, canvasH) * 0.15, 140);
@@ -1184,15 +1191,35 @@ class CanvasRenderer {
       }
       ctx.stroke();
 
-      // Landmarks
+      // Landmarks — highlight center point, show numbers in pick mode
+      const centerLm = st.get('wheelCenterIdx');
+      const pickMode = st.get('selectCenterMode');
       for (let i=0; i<pts.length; i++) {
         const isTip = [4,8,12,16,20].includes(i);
+        const isCenter = (i === centerLm);
+        const r = pickMode ? 7 : (isCenter ? 6 : isTip ? 4.5 : 2.8);
         ctx.beginPath();
-        ctx.arc(pts[i].x, pts[i].y, isTip?4.5:2.8, 0, Math.PI*2);
-        ctx.fillStyle = hand.label==='L'
-          ? rgbToCss(...this.chordColorRgb, isTip?0.9:0.5)
+        ctx.arc(pts[i].x, pts[i].y, r, 0, Math.PI*2);
+        ctx.fillStyle = pickMode ? 'rgba(255,255,80,0.8)'
+          : isCenter ? 'rgba(255,255,80,0.9)'
+          : hand.label==='L' ? rgbToCss(...this.chordColorRgb, isTip?0.9:0.5)
           : `rgba(255,255,255,${isTip?0.85:0.45})`;
         ctx.fill();
+        // Number label in pick mode
+        if (pickMode) {
+          ctx.fillStyle = '#000';
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(i, pts[i].x, pts[i].y);
+        }
+        if (isCenter && !pickMode) {
+          ctx.beginPath();
+          ctx.arc(pts[i].x, pts[i].y, 8, 0, Math.PI*2);
+          ctx.strokeStyle = 'rgba(255,255,80,0.6)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
       }
     }
 
@@ -1515,8 +1542,34 @@ class App {
       await this.start(true);
     });
 
-    // Store refs
-    this.ui = { splash, btnStart, btnSkip, progressFill, loaderText, calOverlay, calTitle, calHint, calProgress, chordDisplay, handLostGuide };
+    // Canvas click to pick center landmark
+    this.canvas.addEventListener('click', (e) => {
+      if (!this.state.get('selectCenterMode')) return;
+      const rect = this.canvas.getBoundingClientRect();
+      const sx = this.canvas.width / rect.width;
+      const sy = this.canvas.height / rect.height;
+      const mx = (e.clientX - rect.left) * sx;
+      const my = (e.clientY - rect.top) * sy;
+
+      // Check all hand landmarks
+      const lmList = [this.state.get('leftLandmarks'), this.state.get('rightLandmarks')].filter(Boolean);
+      let bestLm = -1, bestDist = 25; // 25px threshold
+      for (const lm of lmList) {
+        for (let i=0; i<21; i++) {
+          const px = (1-lm[i].x) * this.canvas.width;
+          const py = lm[i].y * this.canvas.height;
+          const d = Math.hypot(mx-px, my-py);
+          if (d < bestDist) { bestDist = d; bestLm = i; }
+        }
+      }
+      if (bestLm >= 0) {
+        this.state.set('wheelCenterIdx', bestLm);
+        this.state.set('selectCenterMode', false);
+        document.getElementById('btn-wheel-center').classList.remove('active');
+        const names = ['Wrist','ThCMC','ThMCP','ThIP','ThTip','IdxMCP','IdxPIP','IdxDIP','IdxTip','MidMCP','MidPIP','MidDIP','MidTip','RingMCP','RingPIP','RingDIP','RingTip','PinkyMCP','PinkyPIP','PinkyDIP','PinkyTip'];
+        document.getElementById('btn-wheel-center').textContent = '🎯 Center: ' + (names[bestLm] || bestLm);
+      }
+    });
 
     // Mute button
     document.getElementById('btn-mute').addEventListener('click', ()=>{
@@ -1563,7 +1616,6 @@ class App {
       this.state.set('lockChordType', !cur);
       document.getElementById('btn-lock-chord').classList.toggle('active', !cur);
       if (!cur) {
-        // Just locked — snap to current wheel sector
         const sector = this.state.get('activeSector');
         if (sector >= 0) {
           const types = this.state.get('currentWheel') === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
@@ -1571,6 +1623,22 @@ class App {
           this._triggerChordFromState();
         }
       }
+    });
+
+    // Wheel center pick mode
+    const btnCenter = document.getElementById('btn-wheel-center');
+    btnCenter.addEventListener('click', ()=>{
+      const active = this.state.get('selectCenterMode');
+      this.state.set('selectCenterMode', !active);
+      btnCenter.classList.toggle('active', !active);
+      btnCenter.textContent = active ? '🎯 Pick Center' : '🎯 TAP a hand dot...';
+    });
+
+    // Swap hands toggle
+    document.getElementById('btn-swap-hands').addEventListener('click', ()=>{
+      const cur = this.state.get('swapHands');
+      this.state.set('swapHands', !cur);
+      document.getElementById('btn-swap-hands').classList.toggle('active', !cur);
     });
 
     // Help button
@@ -1796,13 +1864,16 @@ class App {
     const landmarks = result?.landmarks || [];
     const handedness = result?.handedness || [];
 
-    // Separate left and right hands
+    // Separate left and right hands (swapped if swapHands enabled)
     let leftLm = null, rightLm = null;
     for (let i=0; i<landmarks.length; i++) {
       const cat = handedness[i]?.[0];
       const label = cat?.categoryName;
       if (label === 'Left') leftLm = landmarks[i];
       else if (label === 'Right') rightLm = landmarks[i];
+    }
+    if (this.state.get('swapHands')) {
+      [leftLm, rightLm] = [rightLm, leftLm];
     }
 
     const leftPresent = !!leftLm;
