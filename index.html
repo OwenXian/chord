@@ -827,7 +827,15 @@ class AudioEngine {
   async init() {
     console.log('[Audio] Starting Tone.js...');
     await Tone.start();
-    console.log('[Audio] Tone.js started, AudioContext:', Tone.getContext().state);
+    // Mobile: force AudioContext to running state
+    const ctx = Tone.getContext().rawContext;
+    if (ctx.state !== 'running') {
+      await ctx.resume();
+    }
+    // Brief silent tone to unlock mobile audio
+    const warm = new Tone.Oscillator(440, 'sine').connect(new Tone.Gain(0.001).toDestination());
+    warm.start().stop('+0.05');
+    console.log('[Audio] Context state:', ctx.state);
 
     // ---- Piano: clean triangle + sine, percussive envelope, light reverb ----
     this.masterGain = new Tone.Gain(0.6).toDestination();
