@@ -450,7 +450,7 @@ const FINGERS = [
 const CHORD_TYPES_1 = ['maj7','min7','7','maj','min','add9'];
 const CHORD_TYPES_2 = ['sus2','sus4','dim7','aug7','aug9'];
 const CHORD_LABELS_1 = { maj7:'M7', min7:'m7', 7:'7', maj:'M', min:'m', add9:'+9' };
-const CHORD_LABELS_2 = { sus2:'S2', sus4:'S4', dim7:'d7', aug7:'A7', aug9:'A9' };
+const CHORD_LABELS_2 = { sus2:'sus2', sus4:'sus4', dim7:'dim7', aug7:'aug7', aug9:'aug9' };
 const CHORD_INTERVALS = {
   maj7: [0,4,7,11], min7: [0,3,7,10], 7: [0,4,7,10],
   maj: [0,4,7], min: [0,3,7], add9: [0,2,4,7],
@@ -740,9 +740,9 @@ class GestureRecognizer {
   isExtended(metric, fingerName) {
     const thresh = this.state.get('fingerThresholds');
     if (!thresh || !thresh[fingerName]) {
-      // Default: ratio > 1.15 means extended (tip noticeably farther from wrist than PIP)
-      const defaults = { thumb:1.08, index:1.12, middle:1.12, ring:1.10, pinky:1.08 };
-      return metric.ratio > (defaults[fingerName] || 1.12);
+      // Default: ratio > threshold means extended (lower = easier to detect)
+      const defaults = { thumb:1.04, index:1.08, middle:1.08, ring:1.06, pinky:1.04 };
+      return metric.ratio > (defaults[fingerName] || 1.08);
     }
     const t = thresh[fingerName];
     return metric.ratio > t.mid;
@@ -755,7 +755,7 @@ class GestureRecognizer {
     const d = dist2d(thumbTip.x, thumbTip.y, pinkyMCP.x, pinkyMCP.y);
     const thresh = this.state.get('fingerThresholds');
     if (thresh && thresh.thumb) return d > thresh.thumb.mid;
-    return d > 0.2;
+    return d > 0.16;
   }
 
   // Classify gesture from landmarks
@@ -1196,106 +1196,109 @@ class CanvasRenderer {
       }
     }
 
-    // ---- Draw chord wheel ----
-    const activeSector = st.get('activeSector');
-    const lockedSector = st.get('lockedSector');
-    const dwellProgress = st.get('dwellProgress');
-    const fixedWheel = st.get('fixedWheel');
-    const activeWheel = st.get('currentWheel');
-    const numSectors = activeWheel === 1 ? 6 : 5;
-    const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
-    const chordLabels = activeWheel === 1 ? CHORD_LABELS_1 : CHORD_LABELS_2;
+    // ---- Draw BOTH chord wheels ----
+    if (st.get('rightPresent') || st.get('fixedWheel')) {
+      const rr = Math.min(w, h) * 0.17;
+      const r = Math.min(rr, 170);
+      const activeWheel = st.get('currentWheel');
+      const fixedWheel = st.get('fixedWheel');
 
-    if (st.get('rightPresent') || fixedWheel) {
-      let wx, wy;
-      if (fixedWheel) {
-        // Fixed: right side, wheel 2 top-right, wheel 1 bottom-right
-        if (activeWheel === 2) { wx = w * 0.75; wy = h * 0.3; }
-        else { wx = w * 0.75; wy = h * 0.7; }
-      } else {
-        wx = st.get('wristPos').x;
-        wy = st.get('wristPos').y;
-      }
-      const rr = Math.min(w, h) * 0.13;
-      const r = Math.min(rr, 130);
+      // Define both wheels: { numSectors, types, labels, fixedX, fixedY, name }
+      const wheels = [
+        { n:6, types:CHORD_TYPES_1, labels:CHORD_LABELS_1, fx:w*0.75, fy:h*0.7, id:1 },
+        { n:5, types:CHORD_TYPES_2, labels:CHORD_LABELS_2, fx:w*0.75, fy:h*0.3, id:2 },
+      ];
 
-      ctx.save();
-      ctx.translate(wx, wy);
+      for (const wh of wheels) {
+        const isActiveWheel = (wh.id === activeWheel);
+        let wx, wy;
+        if (fixedWheel) {
+          wx = wh.fx; wy = wh.fy;
+        } else if (isActiveWheel) {
+          wx = st.get('wristPos').x;
+          wy = st.get('wristPos').y;
+        } else {
+          // Inactive wheel stays at its fixed position
+          wx = wh.fx; wy = wh.fy;
+        }
 
-      // Outer ring
-      ctx.beginPath();
-      ctx.arc(0, 0, r, 0, Math.PI*2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+        ctx.save();
+        ctx.translate(wx, wy);
 
-      // Sectors
-      const sectorAngle = (Math.PI*2)/numSectors;
-      for (let i=0; i<numSectors; i++) {
-        const startA = -Math.PI/2 + i*sectorAngle;
-        const endA = startA + sectorAngle;
-        const chordType = chordTypes[i];
-        const colorRgb = CHORD_COLORS[chordType]?.rgb || [255,255,255];
-        const isActive = (activeSector===i);
-        const isLocked = (lockedSector===i);
-
+        // Outer ring (brighter for active wheel)
         ctx.beginPath();
-        ctx.moveTo(0,0);
-        ctx.arc(0, 0, r, startA, endA);
-        ctx.closePath();
-        ctx.fillStyle = isLocked
-          ? rgbToCss(...colorRgb, 0.5)
-          : isActive
-            ? rgbToCss(...colorRgb, 0.25 + dwellProgress*0.25)
-            : rgbToCss(...colorRgb, 0.12);
-        ctx.fill();
+        ctx.arc(0, 0, r, 0, Math.PI*2);
+        ctx.strokeStyle = isActiveWheel ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
-        if (isLocked) {
-          ctx.shadowColor = rgbToCss(...colorRgb, 0.7);
-          ctx.shadowBlur = 18;
-          ctx.strokeStyle = rgbToCss(...colorRgb, 0.9);
-          ctx.lineWidth = 3;
+        const sectorAngle = (Math.PI*2)/wh.n;
+        const activeSector = isActiveWheel ? st.get('activeSector') : -1;
+        const lockedSector = isActiveWheel ? st.get('lockedSector') : -1;
+
+        for (let i=0; i<wh.n; i++) {
+          const startA = -Math.PI/2 + i*sectorAngle;
+          const endA = startA + sectorAngle;
+          const chordType = wh.types[i];
+          const colorRgb = CHORD_COLORS[chordType]?.rgb || [255,255,255];
+          const isLocked = (lockedSector===i);
+          const isHovered = (activeSector===i);
+
+          ctx.beginPath();
+          ctx.moveTo(0,0);
+          ctx.arc(0, 0, r, startA, endA);
+          ctx.closePath();
+          const alpha = isActiveWheel ? (isLocked ? 0.5 : isHovered ? 0.35 : 0.12) : 0.06;
+          ctx.fillStyle = rgbToCss(...colorRgb, alpha);
+          ctx.fill();
+
+          if (isLocked && isActiveWheel) {
+            ctx.shadowColor = rgbToCss(...colorRgb, 0.7);
+            ctx.shadowBlur = 16;
+            ctx.strokeStyle = rgbToCss(...colorRgb, 0.85);
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+          }
+
+          ctx.beginPath();
+          ctx.moveTo(0,0);
+          ctx.arc(0, 0, r, startA, endA);
+          ctx.closePath();
+          ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+          ctx.lineWidth = 1;
           ctx.stroke();
-          ctx.shadowBlur = 0;
+
+          const midA = startA + sectorAngle/2;
+          const lx = Math.cos(midA) * r * 0.62;
+          const ly = Math.sin(midA) * r * 0.62;
+          ctx.fillStyle = isActiveWheel ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
+          const fSize = wh.id === 2 ? Math.round(r * 0.11) : Math.round(r * 0.14);
+          ctx.font = `bold ${fSize}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(wh.labels[chordType] || '?', lx, ly);
+        }
+
+        // Active sector highlight arc
+        if (isActiveWheel && activeSector >= 0) {
+          const startA = -Math.PI/2 + activeSector*sectorAngle;
+          ctx.beginPath();
+          ctx.arc(0, 0, r+4, startA, startA + sectorAngle);
+          ctx.strokeStyle = rgbToCss(...this.chordColorRgb, 0.6);
+          ctx.lineWidth = 2.5;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          ctx.lineCap = 'butt';
         }
 
         ctx.beginPath();
-        ctx.moveTo(0,0);
-        ctx.arc(0, 0, r, startA, endA);
-        ctx.closePath();
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        ctx.arc(0, 0, 3, 0, Math.PI*2);
+        ctx.fillStyle = isActiveWheel ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.15)';
+        ctx.fill();
 
-        const midA = startA + sectorAngle/2;
-        const lx = Math.cos(midA) * r * 0.62;
-        const ly = Math.sin(midA) * r * 0.62;
-        ctx.fillStyle = 'rgba(255,255,255,0.75)';
-        ctx.font = 'bold 11px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(chordLabels[chordType] || '?', lx, ly);
+        ctx.restore();
       }
-
-      // Dwell progress arc (instant trigger, always full)
-      if (activeSector >= 0) {
-        const startA = -Math.PI/2 + activeSector*sectorAngle;
-        ctx.beginPath();
-        ctx.arc(0, 0, r+5, startA, startA + sectorAngle);
-        ctx.strokeStyle = rgbToCss(...this.chordColorRgb, 0.7);
-        ctx.lineWidth = 2.5;
-        ctx.lineCap = 'round';
-        ctx.stroke();
-        ctx.lineCap = 'butt';
-      }
-
-      // Center dot
-      ctx.beginPath();
-      ctx.arc(0, 0, 4, 0, Math.PI*2);
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      ctx.fill();
-
-      ctx.restore();
     }
 
     // Particles removed
