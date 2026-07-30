@@ -207,6 +207,28 @@ body {
   50% { box-shadow: 0 0 0 12px rgba(224,64,64,0); }
 }
 
+/* ---- Menu Popup ---- */
+#menu-popup {
+  position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+  z-index: 150; display: none;
+}
+#menu-popup.show { display: block; }
+.menu-content {
+  background: rgba(20,20,40,0.95); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 12px; padding: 10px; display: flex; flex-wrap: wrap;
+  gap: 6px; justify-content: center; max-width: 320px;
+}
+.menu-btn {
+  padding: 8px 14px; font-size: 12px; letter-spacing: 0.04em;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.8);
+  border-radius: 16px; cursor: pointer;
+  transition: all 0.2s ease; white-space: nowrap;
+}
+.menu-btn:hover { background: rgba(255,255,255,0.15); }
+.menu-btn.active { background: var(--chord-color); border-color: var(--chord-color); color: #000; }
+.menu-close { border-color: rgba(255,80,80,0.4); color: rgba(255,100,100,0.9); }
+
 /* ---- Virtual Keyboard (left side, vertical) ---- */
 #keyboard {
   position: fixed; left: 16px; top: 50%; transform: translateY(-50%);
@@ -329,12 +351,21 @@ body {
 <!-- Controls -->
 <div id="controls">
   <button class="ctrl-btn" id="btn-mute">🔊 Mute</button>
-  <button class="ctrl-btn" id="btn-single-hand">👆 Single Hand</button>
   <button class="ctrl-btn" id="btn-fixed-wheel">📍 Fix Wheel</button>
-  <button class="ctrl-btn" id="btn-lock-chord">🔒 Lock Chord</button>
-  <button class="ctrl-btn" id="btn-wheel-center">🎯 Pick Center</button>
-  <button class="ctrl-btn" id="btn-swap-hands">🔄 Swap Hands</button>
-  <button class="ctrl-btn" id="btn-help">❓ Help</button>
+  <button class="ctrl-btn" id="btn-record-audio">⏺ Rec</button>
+  <button class="ctrl-btn" id="btn-menu">☰ Menu</button>
+</div>
+
+<!-- Menu popup -->
+<div id="menu-popup">
+  <div class="menu-content">
+    <button class="menu-btn" id="btn-single-hand">👆 Single Hand</button>
+    <button class="menu-btn" id="btn-lock-chord">🔒 Lock Chord</button>
+    <button class="menu-btn" id="btn-wheel-center">🎯 Pick Center</button>
+    <button class="menu-btn" id="btn-swap-hands">🔄 Swap Hands</button>
+    <button class="menu-btn" id="btn-touch-mode">👈 Touch Mode</button>
+    <button class="menu-btn menu-close" id="btn-menu-close">✕ Close</button>
+  </div>
 </div>
 
 <!-- Help Modal -->
@@ -494,9 +525,10 @@ const CONFIG = {
   hysteresisPx: 5,         // px into sector to register (reduced for instant response)
   debounceFrames: 1,       // no debounce — instant response
   cooldownMs: 50,          // minimal cooldown
-  crossfadeMs: 0.15,       // seconds for A/B crossfade (smooth legato)
-  handLostTimeout: 2000,   // ms before hand loss triggers
-  fadeOutDuration: 2,      // seconds to fade on hand loss
+  crossfadeMs: 0.15,       // A/B crossfade
+  chordReleaseDelay: 0.018, // 18ms delay before releasing old chord (smooth overlap)
+  handLostTimeout: 1000,   // 1s before hand loss triggers
+  fadeOutDuration: 1,      // 1s fade to silence
   fadeInDuration: 1,       // seconds to restore on hand return
   particleCount: 18,
   fpsWindow: 30,           // rolling frames for FPS
@@ -553,7 +585,8 @@ class StateManager extends Emitter {
       fixedWheel: false,
       lockChordType: false,
       wheelCenterIdx: 0,   // selected landmark index (0-20)
-      selectCenterMode: false, // true=user picking a landmark
+      selectCenterMode: false,
+      touchMode: false,       // tap-to-play mode
       swapHands: false,
       // Calibration
       calPhase: 'idle', // idle|fist|open|done
@@ -853,10 +886,11 @@ class ChordWheelDetector {
     const dx = ix - cx, dy = iy - cy;
     const dist = Math.hypot(dx, dy);
 
-    const wheelR = Math.min(Math.min(canvasW, canvasH) * 0.15, 140);
+    const wheelR = Math.min(Math.min(canvasW, canvasH) * 0.20, 195);
 
     if (dist < 15 || dist > wheelR) {
-      this.state.update({ activeSector:-1, dwellStartTime:0, dwellProgress:0, wheelDistance:dist });
+      // Keep last active sector when finger leaves (phone-friendly)
+      this.state.set('wheelDistance', dist);
       return null;
     }
 
@@ -1025,7 +1059,8 @@ class AudioEngine {
       this.gains[`${ln}_${inactive}`].gain.rampTo(1, fadeTime);
     }
 
-    // After crossfade, release old bank
+    // Delay release of old chord for smooth overlap (18ms)
+    const releaseDelay = (fadeTime * 1000) + (CONFIG.chordReleaseDelay * 1000);
     setTimeout(() => {
       for (let i = 0; i < layerNames.length; i++) {
         try {
@@ -1033,7 +1068,7 @@ class AudioEngine {
         } catch(e) { /* ignore */ }
       }
       this.activeBank = inactive;
-    }, fadeTime * 1000 + 20);
+    }, releaseDelay);
   }
 
   silence() {
@@ -1225,8 +1260,8 @@ class CanvasRenderer {
 
     // ---- Draw BOTH chord wheels ----
     if (st.get('rightPresent') || st.get('fixedWheel')) {
-      const rr = Math.min(w, h) * 0.17;
-      const r = Math.min(rr, 170);
+      const rr = Math.min(w, h) * 0.20;
+      const r = Math.min(rr, 195);
       const activeWheel = st.get('currentWheel');
       const fixedWheel = st.get('fixedWheel');
 
@@ -1587,30 +1622,23 @@ class App {
       }
     });
 
-    // Single-hand toggle
+    // ---- UI buttons ----
+    // Menu toggle
+    document.getElementById('btn-menu').addEventListener('click', ()=>{
+      document.getElementById('menu-popup').classList.toggle('show');
+    });
+    document.getElementById('btn-menu-close').addEventListener('click', ()=>{
+      document.getElementById('menu-popup').classList.remove('show');
+    });
+
+    // Menu: Single-hand
     document.getElementById('btn-single-hand').addEventListener('click', ()=>{
       const cur = this.state.get('singleHandMode');
       this.state.set('singleHandMode', !cur);
       document.getElementById('btn-single-hand').classList.toggle('active', !cur);
     });
 
-    // Volume slider (invert: top=loud, bottom=quiet)
-    const volumeSlider = document.getElementById('volume-slider');
-    volumeSlider.addEventListener('input', () => {
-      const vol = (100 - parseInt(volumeSlider.value)) / 100; // inverted
-      if (this.audio.masterGain) {
-        this.audio.masterGain.gain.rampTo(0.1 + vol * 0.7, 0.05);
-      }
-    });
-
-    // Fixed wheel toggle
-    document.getElementById('btn-fixed-wheel').addEventListener('click', ()=>{
-      const cur = this.state.get('fixedWheel');
-      this.state.set('fixedWheel', !cur);
-      document.getElementById('btn-fixed-wheel').classList.toggle('active', !cur);
-    });
-
-    // Lock chord type toggle
+    // Menu: Lock chord
     document.getElementById('btn-lock-chord').addEventListener('click', ()=>{
       const cur = this.state.get('lockChordType');
       this.state.set('lockChordType', !cur);
@@ -1625,28 +1653,108 @@ class App {
       }
     });
 
-    // Wheel center pick mode
+    // Menu: Wheel center pick
     const btnCenter = document.getElementById('btn-wheel-center');
     btnCenter.addEventListener('click', ()=>{
       const active = this.state.get('selectCenterMode');
       this.state.set('selectCenterMode', !active);
       btnCenter.classList.toggle('active', !active);
       btnCenter.textContent = active ? '🎯 Pick Center' : '🎯 TAP a hand dot...';
+      document.getElementById('menu-popup').classList.remove('show');
     });
 
-    // Swap hands toggle
+    // Menu: Swap hands
     document.getElementById('btn-swap-hands').addEventListener('click', ()=>{
       const cur = this.state.get('swapHands');
       this.state.set('swapHands', !cur);
       document.getElementById('btn-swap-hands').classList.toggle('active', !cur);
     });
 
-    // Help button
-    document.getElementById('btn-help').addEventListener('click', ()=>{
-      document.getElementById('help-modal').classList.add('show');
+    // Menu: Touch mode
+    document.getElementById('btn-touch-mode').addEventListener('click', ()=>{
+      const cur = this.state.get('touchMode');
+      this.state.set('touchMode', !cur);
+      document.getElementById('btn-touch-mode').classList.toggle('active', !cur);
+      if (!cur) {
+        // Enable touch mode → fix wheel
+        this.state.set('fixedWheel', true);
+        document.getElementById('btn-fixed-wheel').classList.add('active');
+      }
+      document.getElementById('menu-popup').classList.remove('show');
     });
+
+    // Menu: Help
+    const btnHelp = document.createElement('button');
+    btnHelp.className = 'menu-btn'; btnHelp.textContent = '❓ Help';
+    btnHelp.addEventListener('click', ()=>{
+      document.getElementById('help-modal').classList.add('show');
+      document.getElementById('menu-popup').classList.remove('show');
+    });
+    document.querySelector('.menu-content').insertBefore(btnHelp, document.getElementById('btn-menu-close'));
     document.getElementById('btn-help-close').addEventListener('click', ()=>{
       document.getElementById('help-modal').classList.remove('show');
+    });
+
+    // Fixed wheel (standalone)
+    document.getElementById('btn-fixed-wheel').addEventListener('click', ()=>{
+      const cur = this.state.get('fixedWheel');
+      this.state.set('fixedWheel', !cur);
+      document.getElementById('btn-fixed-wheel').classList.toggle('active', !cur);
+    });
+
+    // Recording
+    this._recording = false; this._mediaRecorder = null; this._recChunks = [];
+    document.getElementById('btn-record-audio').addEventListener('click', async ()=>{
+      if (this._recording) {
+        this._recording = false;
+        if (this._mediaRecorder) { this._mediaRecorder.stop(); this._mediaRecorder = null; }
+        document.getElementById('btn-record-audio').classList.remove('recording');
+        document.getElementById('btn-record-audio').textContent = '⏺ Rec';
+        return;
+      }
+      try {
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const ctx = Tone.getContext().rawContext;
+        const dest = ctx.createMediaStreamDestination();
+        // Route master through recording destination
+        this.audio.masterGain.connect(dest);
+        // Merge mic + synth
+        const micSource = ctx.createMediaStreamSource(micStream);
+        const merger = ctx.createChannelMerger(2);
+        micSource.connect(merger, 0, 0);
+        dest.stream.getAudioTracks().forEach(t => {
+          const s = ctx.createMediaStreamSource(new MediaStream([t]));
+          s.connect(merger, 0, 1);
+          // Actually this is complex — simplify: just record synth output
+        });
+        // Simple approach: record synth output via MediaRecorder on dest stream
+        this._recChunks = [];
+        this._mediaRecorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm' });
+        this._mediaRecorder.ondataavailable = e => { if (e.data.size > 0) this._recChunks.push(e.data); };
+        this._mediaRecorder.onstop = () => {
+          const blob = new Blob(this._recChunks, { type: 'audio/webm' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url; a.download = 'chord-recording.webm';
+          a.click(); URL.revokeObjectURL(url);
+          this.audio.masterGain.disconnect(dest);
+        };
+        this._mediaRecorder.start();
+        this._recording = true;
+        document.getElementById('btn-record-audio').classList.add('recording');
+        document.getElementById('btn-record-audio').textContent = '⏹ Stop';
+      } catch(e) {
+        console.warn('Recording failed:', e);
+        alert('Recording requires microphone permission.');
+      }
+    });
+
+    // Volume slider
+    const volumeSlider = document.getElementById('volume-slider');
+    volumeSlider.addEventListener('input', () => {
+      const vol = (100 - parseInt(volumeSlider.value)) / 100;
+      if (this.audio.masterGain) {
+        this.audio.masterGain.gain.rampTo(0.1 + vol * 0.7, 0.05);
+      }
     });
 
     // State listeners
