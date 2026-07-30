@@ -481,8 +481,8 @@ const CONFIG = {
   wheelRadius: 120,
   dwellTime: 400,          // ms to lock chord type
   hysteresisPx: 5,         // px into sector to register (reduced for instant response)
-  debounceFrames: 3,       // consecutive frames (reduced for faster response)
-  cooldownMs: 150,         // ms between root changes (reduced)
+  debounceFrames: 1,       // no debounce — instant response
+  cooldownMs: 50,          // minimal cooldown
   crossfadeMs: 0.15,       // seconds for A/B crossfade (smooth legato)
   handLostTimeout: 2000,   // ms before hand loss triggers
   fadeOutDuration: 2,      // seconds to fade on hand loss
@@ -706,43 +706,46 @@ class HandTracker {
 class GestureRecognizer {
   constructor(state) { this.state = state; }
 
-  // Compute finger extension metrics (unnormalized)
+  // Compute finger extension metrics — uses tip-to-wrist distance ratio
   fingerMetrics(landmarks) {
+    const wrist = landmarks[0];
     const metrics = [];
     for (const f of FINGERS) {
       const tip = landmarks[f.tip];
       const pip = landmarks[f.pip];
       const mcp = landmarks[f.mcp];
-      // Y-diff: positive when tip is above pip (extended upward)
+      // Ratio: tip-to-wrist distance / pip-to-wrist distance
+      // Extended finger: tip is farther from wrist → ratio > 1.2
+      const tipDist = dist2d(tip.x, tip.y, wrist.x, wrist.y);
+      const pipDist = dist2d(pip.x, pip.y, wrist.x, wrist.y);
+      const ratio = tipDist / Math.max(pipDist, 0.001);
+      // Also keep Y-diff as fallback
       const yDiff = pip.y - tip.y;
-      // Also use distance from mcp
-      const distMCP = dist2d(tip.x, tip.y, mcp.x, mcp.y);
-      metrics.push({ name:f.name, yDiff, distMCP, tip, pip, mcp });
+      metrics.push({ name:f.name, yDiff, ratio, tip, pip, mcp });
     }
     return metrics;
   }
 
-  // Check if a finger is extended using calibrated thresholds
+  // Check if a finger is extended using ratio-based detection (works at any hand angle)
   isExtended(metric, fingerName) {
     const thresh = this.state.get('fingerThresholds');
     if (!thresh || !thresh[fingerName]) {
-      // Default thresholds (normalized coords ~0-1)
-      const defaults = { thumb:0.03, index:0.04, middle:0.04, ring:0.03, pinky:0.03 };
-      return metric.yDiff > (defaults[fingerName] || 0.04);
+      // Default: ratio > 1.15 means extended (tip noticeably farther from wrist than PIP)
+      const defaults = { thumb:1.08, index:1.12, middle:1.12, ring:1.10, pinky:1.08 };
+      return metric.ratio > (defaults[fingerName] || 1.12);
     }
     const t = thresh[fingerName];
-    // Normalize: if yDiff > mid threshold, it's extended
-    return metric.yDiff > t.mid;
+    return metric.ratio > t.mid;
   }
 
-  // Thumb uses different heuristic: distance from thumb tip to pinky MCP
+  // Thumb: distance from thumb tip to pinky MCP > threshold
   isThumbExtended(landmarks) {
     const thumbTip = landmarks[4];
     const pinkyMCP = landmarks[17];
     const d = dist2d(thumbTip.x, thumbTip.y, pinkyMCP.x, pinkyMCP.y);
     const thresh = this.state.get('fingerThresholds');
     if (thresh && thresh.thumb) return d > thresh.thumb.mid;
-    return d > 0.25; // default threshold
+    return d > 0.2;
   }
 
   // Classify gesture from landmarks
@@ -836,10 +839,11 @@ class ChordWheelDetector {
     const dx = ix - wx, dy = iy - wy;
     const dist = Math.hypot(dx, dy);
 
-    // Semitone from right hand (handled in main loop)
+    // Dynamic wheel radius: 15% of smaller viewport dimension, max 140px
+    const wheelR = Math.min(Math.min(canvasW, canvasH) * 0.15, 140);
 
     // Check if index tip is within wheel
-    if (dist < 15 || dist > CONFIG.wheelRadius) {
+    if (dist < 15 || dist > wheelR) {
       this.state.update({ activeSector:-1, dwellStartTime:0, dwellProgress:0, wheelDistance:dist });
       return null;
     }
@@ -1123,12 +1127,7 @@ class CanvasRenderer {
   }
 
   triggerTypeParticles(x, y) {
-    const clr = this.state.get('currentType');
-    const rgb = CHORD_COLORS[clr]?.rgb || [255,140,66];
-    this.particles.burst(x, y, rgb, CONFIG.particleCount);
-    // wheel scale animation
-    this.wheelScale = 1.15;
-    this.wheelScaleTime = 0.1;
+    // no animation on type change
   }
 
   setChordColor(type) {
@@ -1216,13 +1215,9 @@ class CanvasRenderer {
         wx = wristP.x;
         wy = wristP.y;
       }
-      const r = CONFIG.wheelRadius * this.wheelScale;
-
-      // Wheel scale animation
-      if (this.wheelScaleTime > 0) {
-        this.wheelScaleTime -= dt;
-        this.wheelScale = lerp(this.wheelScale, 1, 0.15);
-      }
+      // Responsive wheel radius: 15% of the smaller viewport dimension
+      const rr = Math.min(w, h) * 0.15;
+      const r = Math.min(rr, 140);
 
       ctx.save();
       ctx.translate(wx, wy);
@@ -1885,11 +1880,11 @@ class App {
           const vel = this.gestureRec.computeVelocity(leftLm);
           this.state.set('currentVelocity', vel);
 
-          // Semitone shift from LEFT hand height
+          // Semitone shift from LEFT hand height (♯ zone enlarged)
           const lWristY = leftLm[0].y;
           let semitone = 0;
-          if (lWristY < 0.33) semitone = 1;
-          else if (lWristY > 0.66) semitone = -1;
+          if (lWristY < 0.5) semitone = 1;        // top half → ♯
+          else if (lWristY > 0.8) semitone = -1;  // bottom 20% → ♭
           if (semitone !== this.state.get('currentSemitone')) {
             this.state.set('currentSemitone', semitone);
             this._triggerChordFromState();
@@ -1995,8 +1990,8 @@ class App {
     const fingerVals = {};
     for (const m of metrics) {
       fingerVals[m.name] = m.name==='thumb'
-        ? dist2d(leftLm[4].x, leftLm[4].y, leftLm[17].x, leftLm[17].y) // thumb: distance to pinky MCP
-        : m.yDiff;
+        ? dist2d(leftLm[4].x, leftLm[4].y, leftLm[17].x, leftLm[17].y)
+        : m.ratio;
     }
 
     // Accumulate samples
