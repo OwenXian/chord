@@ -1528,7 +1528,9 @@ class App {
     const calProgress = document.getElementById('cal-progress-fill');
     const chordDisplay = document.getElementById('chord-display');
     const handLostGuide = document.getElementById('hand-lost-guide');
-    const fpsCounter = document.getElementById('fps-counter');
+
+    // Store refs
+    this.ui = { splash, btnStart, btnSkip, progressFill, loaderText, calOverlay, calTitle, calHint, calProgress, chordDisplay, handLostGuide };
 
     // Start button
     btnStart.addEventListener('click', async () => {
