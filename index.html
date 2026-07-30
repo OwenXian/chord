@@ -50,7 +50,7 @@ body {
   width: 100%; height: 100%;
   object-fit: cover;
   transform: scaleX(-1);
-  filter: contrast(1.2) brightness(0.9) saturate(1.5);
+  /* no filter */
   z-index: 1;
 }
 
@@ -225,6 +225,28 @@ body {
 .key-btn.pressed { background: var(--chord-color); border-color: var(--chord-color); color: #000; }
 .key-btn .key-label { font-size: 9px; display: block; line-height: 1; margin-top: -2px; opacity: 0.6; }
 
+/* ---- Help Modal ---- */
+#help-modal {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.75); z-index: 200;
+  display: none; align-items: center; justify-content: center;
+}
+#help-modal.show { display: flex; }
+#help-modal .modal-content {
+  background: #1a1a2e; border-radius: 12px; padding: 28px 32px;
+  max-width: 360px; width: 90%; color: #fff;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+#help-modal h3 { font-size: 18px; margin-bottom: 16px; text-align: center; }
+#help-modal table { width: 100%; border-collapse: collapse; }
+#help-modal td { padding: 6px 8px; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+#help-modal td:first-child { font-weight: 600; color: #F0C040; width: 60px; }
+#help-modal .close-btn {
+  display: block; margin: 16px auto 0; padding: 8px 24px;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+  color: #fff; border-radius: 20px; cursor: pointer; font-size: 14px;
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 600px) {
   #keyboard { bottom: 120px; gap: 3px; }
@@ -259,9 +281,6 @@ body {
 <!-- Chord Display -->
 <div id="chord-display">C maj7</div>
 
-<!-- FPS -->
-<div id="fps-counter">-- fps</div>
-
 <!-- Hand Lost Guide -->
 <div id="hand-lost-guide">
   <div class="hand-icon">🖐️</div>
@@ -283,10 +302,39 @@ body {
 <div id="controls">
   <button class="ctrl-btn" id="btn-mute">🔊 Mute</button>
   <button class="ctrl-btn" id="btn-single-hand">👆 Single Hand</button>
-  <button class="ctrl-btn" id="btn-hand-mode">🔇 Mute on Loss</button>
-  <button class="ctrl-btn" id="btn-record">⏺ Record</button>
-  <button class="ctrl-btn" id="btn-playback">▶ Play</button>
-  <button class="ctrl-btn" id="btn-share">🔗 Share</button>
+  <button class="ctrl-btn" id="btn-help">❓ Help</button>
+</div>
+
+<!-- Help Modal -->
+<div id="help-modal">
+  <div class="modal-content">
+    <h3>🎹 左手手势 → 根音</h3>
+    <table>
+      <tr><td>☝️</td><td>食指</td><td>→ C</td></tr>
+      <tr><td>✌️</td><td>食指+中指</td><td>→ D</td></tr>
+      <tr><td>🤟</td><td>食指+中指+无名指</td><td>→ E</td></tr>
+      <tr><td>🖐️</td><td>四指并拢</td><td>→ F</td></tr>
+      <tr><td>✋</td><td>五指全开</td><td>→ G</td></tr>
+      <tr><td>👍</td><td>仅拇指</td><td>→ A</td></tr>
+      <tr><td>🤙</td><td>拇指+小指</td><td>→ B</td></tr>
+    </table>
+    <h3 style="margin-top:20px;">🎡 右手轮盘 → 和弦类型</h3>
+    <table>
+      <tr><td>M7</td><td>maj7</td></tr>
+      <tr><td>m7</td><td>min7</td></tr>
+      <tr><td>7</td><td>dominant 7</td></tr>
+      <tr><td>M</td><td>major</td></tr>
+      <tr><td>m</td><td>minor</td></tr>
+      <tr><td>+9</td><td>add9</td></tr>
+    </table>
+    <p style="font-size:12px;color:rgba(255,255,255,0.5);text-align:center;margin-top:12px;">
+      手在上方 → ♯升半音 &nbsp;|&nbsp; 手在下方 → ♭降半音
+    </p>
+    <p style="font-size:12px;color:rgba(255,255,255,0.4);text-align:center;margin-top:4px;">
+      键盘: ASDFGHJ = C-B &nbsp; 1-6 = 和弦类型
+    </p>
+    <button class="close-btn" id="btn-help-close">关闭 Close</button>
+  </div>
 </div>
 
 <!-- ============================================================ -->
@@ -456,7 +504,7 @@ class StateManager extends Emitter {
       activeSector: -1, dwellStartTime: 0, dwellProgress: 0,
       lockedSector: -1,
       currentType: 'maj7',
-      currentOctave: 0,
+      currentSemitone: 0,  // -1=♭, 0=natural, +1=♯
       // Calibration
       calPhase: 'idle', // idle|fist|open|done
       calProgress: 0,
@@ -753,8 +801,11 @@ class ChordWheelDetector {
     const dx = ix - wx, dy = iy - wy;
     const dist = Math.hypot(dx, dy);
 
-    // Octave always high (locked)
-    this.state.set('currentOctave', 0);
+    // Semitone shift: top=♯(+1), mid=0, bottom=♭(-1)
+    let semitone = 0;
+    if (wrist.y < 0.33) semitone = 1;
+    else if (wrist.y > 0.66) semitone = -1;
+    this.state.set('currentSemitone', semitone);
 
     // Check if index tip is within wheel
     if (dist < 15 || dist > CONFIG.wheelRadius) {
@@ -885,22 +936,21 @@ class AudioEngine {
     console.log('[Audio] Engine ready — 4 synths (2 layers × 2 banks)');
   }
 
-  // Compute note names from root + chord type + octave
-  getNotes(root, type, octaveShift) {
-    const baseMIDI = ROOT_MIDI[root] ?? 48;
-    const rootMIDI = baseMIDI + (octaveShift * 12);
+  // Compute note names from root + chord type + semitone shift
+  getNotes(root, type, semitone) {
+    const baseMIDI = (ROOT_MIDI[root] ?? 48) + (semitone || 0);
     const intervals = CHORD_INTERVALS[type] || [0,4,7];
-    return intervals.map(i => this.midiToNote(rootMIDI + i));
+    return intervals.map(i => this.midiToNote(baseMIDI + i));
   }
 
   // Trigger chord change with A/B crossfade
-  triggerChord(root, type, octaveShift, velocity) {
+  triggerChord(root, type, semitone, velocity) {
     if (!this.ready) {
       console.warn('[Audio] Not ready, skipping trigger');
       return;
     }
 
-    const notes = this.getNotes(root, type, octaveShift);
+    const notes = this.getNotes(root, type, semitone);
     const subNotes = notes.map(n => {
       // Drop an octave: parse note name, subtract 12 from MIDI
       const midi = Tone.Frequency(n).toMidi();
@@ -912,7 +962,7 @@ class AudioEngine {
     const layerNames = ['strings','sub'];
     const noteSets = [notes, subNotes];
 
-    console.log('[Audio] Chord:', root, type, 'oct:', octaveShift, 'notes:', notes.join(' '));
+    console.log('[Audio] Chord:', root, type, 'st:', semitone, 'notes:', notes.join(' '));
 
     // Trigger notes on inactive bank
     for (let i = 0; i < layerNames.length; i++) {
@@ -1062,16 +1112,7 @@ class CanvasRenderer {
 
     ctx.clearRect(0, 0, w, h);
 
-    // ---- Vignette ----
-    if (complexity !== 'low') {
-      const cx=w/2, cy=h/2, r=Math.hypot(w,h)*0.55;
-      const grad = ctx.createRadialGradient(cx, cy, r*0.35, cx, cy, r);
-      grad.addColorStop(0, 'rgba(0,0,0,0)');
-      grad.addColorStop(0.5, 'rgba(0,0,0,0.15)');
-      grad.addColorStop(1, 'rgba(0,0,0,0.7)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
-    }
+    // Vignette removed
 
     // ---- Color interpolation (smooth 2s transition) ----
     if (this.colorLerp < 1) {
@@ -1242,33 +1283,31 @@ class CanvasRenderer {
       ctx.fillStyle = 'rgba(255,255,255,0.6)';
       ctx.fill();
 
-      // Octave indicator (small bar on the right of wheel)
-      const oct = st.get('currentOctave');
+      // Semitone indicator
+      const semitone = st.get('currentSemitone');
       const barX = r + 16;
-      for (let oi=-1; oi<=1; oi++) {
-        const by = oi * -10;
-        ctx.fillStyle = oct===oi ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.2)';
+      for (let si=-1; si<=1; si++) {
+        const by = si * -10;
+        ctx.fillStyle = semitone===si ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.2)';
         ctx.fillRect(barX-2, by-2, 6, 4);
       }
-      // Octave label
       ctx.fillStyle = 'rgba(255,255,255,0.5)';
       ctx.font = '9px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(oct>0?'+8ve':oct<0?'-8ve':'mid', barX+6, 3);
+      ctx.fillText(semitone>0?'♯':semitone<0?'♭':'', barX+6, 3);
 
       ctx.restore();
     }
 
-    // ---- Draw particles ----
-    if (complexity !== 'low') {
-      this.particles.draw(ctx);
-    }
+    // Particles removed
 
     // ---- Chord name on canvas (bottom center) ----
     const type = st.get('currentType');
     const root = st.get('currentRoot');
     const oct = st.get('currentOctave');
-    const displayName = `${root}${type}`;
+    const st2 = st.get('currentSemitone');
+    const acc = st2 > 0 ? '♯' : st2 < 0 ? '♭' : '';
+    const displayName = `${root}${acc}${type}`;
 
     ctx.textAlign = 'center';
     ctx.font = `bold ${Math.round(w*0.06)}px "Segoe UI","Helvetica Neue",sans-serif`;
@@ -1278,11 +1317,7 @@ class CanvasRenderer {
     ctx.fillText(displayName, w/2, h-50);
     ctx.shadowBlur = 0;
 
-    // ---- FPS ----
-    ctx.textAlign = 'right';
-    ctx.font = '11px monospace';
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.fillText(`${st.get('fps')} fps`, w-14, 22);
+    // FPS removed
   }
 }
 
@@ -1308,11 +1343,11 @@ class Recorder {
     this.state.set('recordedEvents', []);
   }
 
-  recordEvent(root, type, octave) {
+  recordEvent(root, type, st) {
     if (!this.state.get('recording')) return;
     this.events.push({
       t: Tone.now() - this.startTime,
-      root, type, octave
+      root, type, st
     });
     this.state.set('recordedEvents', [...this.events]);
   }
@@ -1349,10 +1384,10 @@ class Recorder {
 
     this.playbackTimer = setTimeout(() => {
       if (!this.state.get('playbackActive')) return;
-      this.playbackAudio.triggerChord(ev.root, ev.type, ev.octave, 0.7);
+      this.playbackAudio.triggerChord(ev.root, ev.type, ev.st || 0, 0.7);
       this.state.set('currentRoot', ev.root);
       this.state.set('currentType', ev.type);
-      this.state.set('currentOctave', ev.octave);
+      this.state.set('currentSemitone', ev.st || 0);
       this.playbackIdx++;
       this._scheduleNextPlayback();
     }, waitMs);
@@ -1372,7 +1407,7 @@ class Recorder {
       t: Math.round(e.t*1000),
       r: ROOT_NOTES.indexOf(e.root),
       c: CHORD_TYPES.indexOf(e.type),
-      o: e.octave
+      s: e.st||0
     }));
     return btoa(JSON.stringify(compact));
   }
@@ -1384,7 +1419,7 @@ class Recorder {
         t: e.t/1000,
         root: ROOT_NOTES[e.r],
         type: CHORD_TYPES[e.c],
-        octave: e.o||0
+        st: e.s||0
       }));
       return this.events;
     } catch(e) {
@@ -1479,7 +1514,7 @@ class App {
     });
 
     // Store refs
-    this.ui = { splash, btnStart, btnSkip, progressFill, loaderText, calOverlay, calTitle, calHint, calProgress, chordDisplay, handLostGuide, fpsCounter };
+    this.ui = { splash, btnStart, btnSkip, progressFill, loaderText, calOverlay, calTitle, calHint, calProgress, chordDisplay, handLostGuide };
 
     // Mute button
     document.getElementById('btn-mute').addEventListener('click', ()=>{
@@ -1497,68 +1532,37 @@ class App {
       }
     });
 
-    // Control buttons
+    // Single-hand toggle
     document.getElementById('btn-single-hand').addEventListener('click', ()=>{
       const cur = this.state.get('singleHandMode');
       this.state.set('singleHandMode', !cur);
       document.getElementById('btn-single-hand').classList.toggle('active', !cur);
     });
-    document.getElementById('btn-hand-mode').addEventListener('click', ()=>{
-      const cur = this.state.get('missingHandBehavior');
-      const next = cur==='sustain'?'mute':'sustain';
-      this.state.set('missingHandBehavior', next);
-      document.getElementById('btn-hand-mode').textContent = next==='sustain'?'🔊 Sustain on Loss':'🔇 Mute on Loss';
+
+    // Help button
+    document.getElementById('btn-help').addEventListener('click', ()=>{
+      document.getElementById('help-modal').classList.add('show');
     });
-    document.getElementById('btn-record').addEventListener('click', ()=>{
-      if (this.state.get('recording')) {
-        this.recorder.stop();
-        document.getElementById('btn-record').classList.remove('recording');
-        document.getElementById('btn-record').textContent = '⏺ Record';
-      } else {
-        this.recorder.start();
-        document.getElementById('btn-record').classList.add('recording');
-        document.getElementById('btn-record').textContent = '⏹ Stop';
-      }
-    });
-    document.getElementById('btn-playback').addEventListener('click', ()=>{
-      if (this.state.get('playbackActive')) {
-        this.recorder.stopPlayback();
-        document.getElementById('btn-playback').classList.remove('active');
-        document.getElementById('btn-playback').textContent = '▶ Play';
-      } else {
-        this.recorder.startPlayback(this.audio);
-        document.getElementById('btn-playback').classList.add('active');
-        document.getElementById('btn-playback').textContent = '⏸ Stop';
-      }
-    });
-    document.getElementById('btn-share').addEventListener('click', ()=>{
-      const hash = this.recorder.serialize();
-      if (!hash) { alert('Record something first!'); return; }
-      const url = `${window.location.origin}${window.location.pathname}#${hash}`;
-      navigator.clipboard.writeText(url).then(()=>{
-        alert('Share URL copied to clipboard!');
-      }).catch(()=>{
-        prompt('Copy this URL to share:', url);
-      });
+    document.getElementById('btn-help-close').addEventListener('click', ()=>{
+      document.getElementById('help-modal').classList.remove('show');
     });
 
     // State listeners
     this.state.on('currentRoot', () => this._updateChordDisplay());
     this.state.on('currentType', () => this._updateChordDisplay());
-    this.state.on('currentOctave', () => this._updateChordDisplay());
+    this.state.on('currentSemitone', () => this._updateChordDisplay());
     this.state.on('isHandLost', ({new:v}) => {
       handLostGuide.classList.toggle('visible', v);
-    });
-    this.state.on('fps', ({new:v}) => {
-      fpsCounter.textContent = `${v} fps`;
     });
   }
 
   _updateChordDisplay() {
     const root = this.state.get('currentRoot');
     const type = this.state.get('currentType');
+    const st = this.state.get('currentSemitone');
+    const acc = st > 0 ? '♯' : st < 0 ? '♭' : '';
     const display = document.getElementById('chord-display');
-    display.textContent = `${root}${type}`;
+    display.textContent = `${root}${acc}${type}`;
     // Update CSS color variable
     const color = CHORD_COLORS[type]?.hex || '#FF8C42';
     display.style.setProperty('--chord-color', color);
@@ -1613,9 +1617,9 @@ class App {
   _triggerChordFromState() {
     const root = this.state.get('currentRoot');
     const type = this.state.get('currentType');
-    const oct = this.state.get('currentOctave');
+    const st = this.state.get('currentSemitone');
     const vel = this.state.get('currentVelocity');
-    this.audio.triggerChord(root, type, oct, vel);
+    this.audio.triggerChord(root, type, st, vel);
     this.renderer.setChordColor(type);
   }
 
@@ -1861,13 +1865,13 @@ class App {
     if (this.state.get('recording')) {
       const curRoot = this.state.get('currentRoot');
       const curType = this.state.get('currentType');
-      const curOct = this.state.get('currentOctave');
+      const curSt = this.state.get('currentSemitone');
       if (!this._lastRecorded ||
           this._lastRecorded.root !== curRoot ||
           this._lastRecorded.type !== curType ||
-          this._lastRecorded.octave !== curOct) {
-        this.recorder.recordEvent(curRoot, curType, curOct);
-        this._lastRecorded = { root:curRoot, type:curType, octave:curOct };
+          this._lastRecorded.st !== curSt) {
+        this.recorder.recordEvent(curRoot, curType, curSt);
+        this._lastRecorded = { root:curRoot, type:curType, st:curSt };
       }
     } else {
       this._lastRecorded = null;
