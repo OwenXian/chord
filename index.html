@@ -1577,10 +1577,45 @@ class App {
       await this.start(true);
     });
 
-    // Canvas click to pick center landmark
+    // Canvas click: pick center landmark OR touch mode wheel tap
     this.canvas.addEventListener('click', (e) => {
-      if (!this.state.get('selectCenterMode')) return;
       const rect = this.canvas.getBoundingClientRect();
+      const sx = this.canvas.width / rect.width;
+      const sy = this.canvas.height / rect.height;
+      const mx = (e.clientX - rect.left) * sx;
+      const my = (e.clientY - rect.top) * sy;
+
+      // Touch mode: tap wheel sectors
+      if (this.state.get('touchMode')) {
+        const fixedW = this.state.get('fixedWheel');
+        const activeW = this.state.get('currentWheel');
+        // Fixed wheel positions
+        const wheel1Pos = { x: this.canvas.width * 0.75, y: this.canvas.height * 0.7 };
+        const wheel2Pos = { x: this.canvas.width * 0.75, y: this.canvas.height * 0.3 };
+        const rr = Math.min(this.canvas.width, this.canvas.height) * 0.20;
+        const r = Math.min(rr, 195);
+
+        for (const wh of [{n:6, types:CHORD_TYPES_1, pos:wheel1Pos, id:1}, {n:5, types:CHORD_TYPES_2, pos:wheel2Pos, id:2}]) {
+          const pos = fixedW ? wh.pos : (activeW === wh.id ? this.state.get('wristPos') : wh.pos);
+          const dx = mx - pos.x, dy = my - pos.y, dist = Math.hypot(dx, dy);
+          if (dist < r && dist > 10) {
+            let angle = Math.atan2(dx, -dy);
+            if (angle < 0) angle += Math.PI*2;
+            const sector = Math.floor(angle / (Math.PI*2 / wh.n));
+            if (sector < wh.types.length) {
+              this.state.set('currentWheel', wh.id);
+              this.state.set('currentType', wh.types[sector]);
+              this.state.set('activeSector', sector);
+              this._triggerChordFromState();
+              return;
+            }
+          }
+        }
+        return;
+      }
+
+      // Pick center mode
+      if (!this.state.get('selectCenterMode')) return;
       const sx = this.canvas.width / rect.width;
       const sy = this.canvas.height / rect.height;
       const mx = (e.clientX - rect.left) * sx;
@@ -1994,8 +2029,10 @@ class App {
       this._runCalibration(leftLm);
     }
 
-    // ---- Gesture Recognition (left hand → root) ----
-    if (calPhase === 'done' || calPhase === 'idle') {
+    // ---- Gesture Recognition (skip if touch mode) ----
+    if (this.state.get('touchMode')) {
+      // Touch mode: all gesture processing skipped
+    } else if (calPhase === 'done' || calPhase === 'idle') {
       const singleHand = this.state.get('singleHandMode');
 
       if (singleHand) {
@@ -2067,7 +2104,8 @@ class App {
       }
     }
 
-    // ---- Hand Lost Detection ----
+    // ---- Hand Lost Detection (skip in touch mode) ----
+    if (!this.state.get('touchMode')) {
     const anyHand = leftPresent || rightPresent;
     if (anyHand) {
       this.handsEverDetected = true;
@@ -2095,6 +2133,7 @@ class App {
         }, CONFIG.handLostTimeout);
       }
     }
+    } // end touch mode check
 
     // ---- Record chord events (only on change) ----
     if (this.state.get('recording')) {
