@@ -945,7 +945,8 @@ class AudioEngine {
 
   _buildSampleUrls() {
     const urls = {};
-    const notes = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    // Only natural notes (user's available samples)
+    const notes = ['C','D','E','F','G','A','B'];
     for (let oct = 5; oct <= 6; oct++) {
       for (const n of notes) {
         const name = n + oct;
@@ -977,13 +978,21 @@ class AudioEngine {
       attack: 0.1,
       release: 0.5,
       curve: 'exponential',
-      maxPolyphony: 32,
+      maxPolyphony: 64,
+      onload: () => {
+        console.log('[Audio] All samples loaded');
+        this.ready = true;
+      },
     });
     this.sampler.connect(this.reverb);
 
-    await new Promise(r => setTimeout(r, 8000));
-    this.ready = true;
-    console.log('[Audio] Sampler ready');
+    // Fallback timeout
+    setTimeout(() => {
+      if (!this.ready) {
+        console.warn('[Audio] Sample load timed out, forcing ready');
+        this.ready = true;
+      }
+    }, 20000);
   }
 
   getNotes(root, type, semitone) {
@@ -995,14 +1004,10 @@ class AudioEngine {
   triggerChord(root, type, semitone, velocity) {
     if (!this.ready) return;
     const notes = this.getNotes(root, type, semitone);
-    console.log('[Audio]', root, type, notes.join(' '), 'count:', notes.length);
-
-    // Release old notes with a tiny delay, then hit new ones
-    const now = Tone.now();
-    this.sampler.releaseAll(now);
-    notes.forEach((n, i) => {
-      this.sampler.triggerAttack(n, now + 0.02 + i * 0.005, velocity);
-    });
+    console.log('[Audio]', root, type, notes.join(' '));
+    // Simple: release old, trigger new as a batch
+    this.sampler.releaseAll(Tone.now());
+    this.sampler.triggerAttack(notes, Tone.now() + 0.03, velocity);
   }
 
   silence() {
