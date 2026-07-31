@@ -1617,10 +1617,7 @@ class App {
 
       // Pick center mode
       if (!this.state.get('selectCenterMode')) return;
-      const sx = this.canvas.width / rect.width;
-      const sy = this.canvas.height / rect.height;
-      const mx = (e.clientX - rect.left) * sx;
-      const my = (e.clientY - rect.top) * sy;
+      // mx, my already computed above
 
       // Check all hand landmarks
       const lmList = [this.state.get('leftLandmarks'), this.state.get('rightLandmarks')].filter(Boolean);
