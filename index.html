@@ -325,6 +325,9 @@ body {
 <!-- Chord Display -->
 <div id="chord-display">C maj7</div>
 
+<!-- Debug log (mobile) -->
+<div id="debug-log" style="position:fixed;bottom:0;left:0;right:0;z-index:300;background:rgba(0,0,0,0.8);color:#0f0;font:10px monospace;max-height:80px;overflow-y:auto;padding:4px 8px;pointer-events:none;display:none;"></div>
+
 <!-- Hand Lost Guide -->
 <div id="hand-lost-guide">
   <div class="hand-icon">🖐️</div>
@@ -411,6 +414,23 @@ body {
 <!-- JavaScript -->
 <!-- ============================================================ -->
 <script type="module">
+// ---- On-screen debug log for mobile ----
+(function() {
+  const dbg = document.getElementById('debug-log');
+  const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+  if (isMobile) dbg.style.display = 'block';
+  const orig = { log:console.log, warn:console.warn, error:console.error };
+  function add(level, args) {
+    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a).slice(0,80)).join(' ');
+    dbg.textContent = '[' + level + '] ' + msg + '\n' + dbg.textContent;
+    dbg.textContent = dbg.textContent.split('\n').slice(0,8).join('\n');
+	orig[level].apply(console, args);
+  }
+  console.log = (...a) => add('log', a);
+  console.warn = (...a) => add('warn', a);
+  console.error = (...a) => add('err', a);
+})();
+
 // ================================================================
 // SECTION 1: MEDIAPIPE DYNAMIC IMPORT WITH FALLBACKS
 // ================================================================
@@ -719,9 +739,12 @@ class HandTracker {
 
     if (onProgress) onProgress(40);
 
+    // Mobile: CPU first, desktop: GPU first
+    const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+    const delegates = isMobile ? ['CPU', 'GPU'] : ['GPU', 'CPU'];
     let lastErr = null;
     for (const modelUrl of modelUrls) {
-      for (const delegate of ['GPU', 'CPU']) {
+      for (const delegate of delegates) {
         try {
           console.log('[HandTracker] Creating with', delegate, 'model:', modelUrl);
           this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
@@ -742,10 +765,11 @@ class HandTracker {
   }
   detect(videoEl, timestamp) {
     if (!this.handLandmarker) return null;
+    if (!videoEl || videoEl.readyState < 2) return null;
     try {
       this.lastResult = this.handLandmarker.detectForVideo(videoEl, timestamp);
     } catch(e) {
-      // occasional WASM errors, ignore silently
+      console.warn('[HandTracker] detect error:', e.message);
     }
     return this.lastResult;
   }
@@ -1920,11 +1944,20 @@ class App {
       this.ui.handLostGuide.classList.add('visible');
     }
 
-    // Wait for video to be ready (critical for mobile)
-    if (this.video.readyState < 2) {
-      await new Promise(r => { this.video.onloadeddata = r; setTimeout(r, 3000); });
+    // Wait for valid video dimensions (critical for mobile)
+    if (!this.video.videoWidth || !this.video.videoHeight) {
+      console.log('[App] Waiting for video dimensions...');
+      await new Promise((resolve) => {
+        let tries = 0;
+        const check = () => {
+          if (this.video.videoWidth > 0 && this.video.videoHeight > 0) resolve();
+          else if (tries++ < 50) setTimeout(check, 200);
+          else { console.warn('[App] Video dims timeout'); resolve(); }
+        };
+        check();
+      });
     }
-    console.log('[App] Video ready, starting loop');
+    console.log('[App] Video:', this.video.videoWidth, 'x', this.video.videoHeight, 'readyState:', this.video.readyState);
     this.lastFrameTime = performance.now();
     this.loop(this.lastFrameTime);
   }
