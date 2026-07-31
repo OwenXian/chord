@@ -936,12 +936,11 @@ class ChordWheelDetector {
 class AudioEngine {
   constructor(state) {
     this.state = state;
-    this.activeBank = 'A';
     this.masterGain = null;
     this.reverb = null;
     this.ready = false;
-    this.samplers = {};
-    this.gains = {};
+    this.sampler = null;
+    this.currentNotes = [];
   }
 
   _buildSampleUrls() {
@@ -958,11 +957,10 @@ class AudioEngine {
   }
 
   async init() {
-    console.log('[Audio] Starting Sampler engine...');
+    console.log('[Audio] Starting Sampler...');
     await Tone.start();
     const ctx = Tone.getContext().rawContext;
     if (ctx.state !== 'running') await ctx.resume();
-    console.log('[Audio] Context:', ctx.state);
 
     this.masterGain = new Tone.Gain(0.55).toDestination();
     this.reverb = new Tone.Reverb({ decay: 1.5, wet: 0.2 });
@@ -973,29 +971,16 @@ class AudioEngine {
     const baseUrl = 'https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/';
     console.log('[Audio] Loading', Object.keys(sampleUrls).length, 'samples...');
 
-    const opts = {
+    this.sampler = new Tone.Sampler({
       urls: sampleUrls,
       baseUrl: baseUrl,
       attack: 0.1,
       release: 0.5,
       curve: 'exponential',
       maxPolyphony: 32,
-    };
+    });
+    this.sampler.connect(this.reverb);
 
-    const samplerA = new Tone.Sampler(opts);
-    const gainA = new Tone.Gain(1);
-    samplerA.connect(gainA);
-    gainA.connect(this.reverb);
-
-    const samplerB = new Tone.Sampler(opts);
-    const gainB = new Tone.Gain(0);
-    samplerB.connect(gainB);
-    gainB.connect(this.reverb);
-
-    this.samplers = { A: samplerA, B: samplerB };
-    this.gains = { A: gainA, B: gainB };
-
-    // Wait for load
     await new Promise(r => setTimeout(r, 8000));
     this.ready = true;
     console.log('[Audio] Sampler ready');
@@ -1010,33 +995,19 @@ class AudioEngine {
   triggerChord(root, type, semitone, velocity) {
     if (!this.ready) return;
     const notes = this.getNotes(root, type, semitone);
-    const active = this.activeBank;
-    const inactive = active === 'A' ? 'B' : 'A';
+    console.log('[Audio]', root, type, notes.join(' '), 'count:', notes.length);
 
-    console.log('[Audio]', root, type, notes.join(' '));
-
-    // Old chord release after overlap
-    setTimeout(() => {
-      try { this.samplers[active].releaseAll(); } catch(e) {}
-    }, CONFIG.chordReleaseDelay * 1000);
-
-    // Trigger each note individually for reliable polyphony
-    try {
-      for (const n of notes) {
-        this.samplers[inactive].triggerAttack(n, undefined, velocity);
-      }
-    } catch(e) { console.error('[Audio]', e); }
-
-    // Crossfade
-    this.gains[active].gain.rampTo(0, CONFIG.crossfadeMs);
-    this.gains[inactive].gain.rampTo(1, CONFIG.crossfadeMs);
-    this.activeBank = inactive;
+    // Release old notes with a tiny delay, then hit new ones
+    const now = Tone.now();
+    this.sampler.releaseAll(now);
+    notes.forEach((n, i) => {
+      this.sampler.triggerAttack(n, now + 0.02 + i * 0.005, velocity);
+    });
   }
 
   silence() {
     if (!this.ready) return;
-    try { this.samplers.A.releaseAll(); } catch(e) {}
-    try { this.samplers.B.releaseAll(); } catch(e) {}
+    try { this.sampler.releaseAll(); } catch(e) {}
   }
 
   fadeOut(duration) {
