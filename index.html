@@ -1920,7 +1920,11 @@ class App {
       this.ui.handLostGuide.classList.add('visible');
     }
 
-    // Start main loop
+    // Wait for video to be ready (critical for mobile)
+    if (this.video.readyState < 2) {
+      await new Promise(r => { this.video.onloadeddata = r; setTimeout(r, 3000); });
+    }
+    console.log('[App] Video ready, starting loop');
     this.lastFrameTime = performance.now();
     this.loop(this.lastFrameTime);
   }
@@ -1938,6 +1942,9 @@ class App {
   // ---- Main Loop ----
   loop(timestamp) {
     this.animFrameId = requestAnimationFrame((t)=>this.loop(t));
+
+    // Skip if video not ready (mobile)
+    if (this.video.readyState < 2) return;
 
     const dt = (timestamp - this.lastFrameTime) / 1000;
     this.lastFrameTime = timestamp;
@@ -2045,13 +2052,18 @@ class App {
             const d2 = Math.hypot(ix2-sideX, iy2-h*0.3);
             activeWheel = d2 < d1 ? 2 : 1;
           } else {
-            // Non-fixed: index finger clearly above/below center (30% margin)
+            // Non-fixed: check which wheel's center the index finger is closer to
             const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
             const cl2 = rightLm[cIdx] || rightLm[9];
-            const dyNorm = cl2.y - indexTip.y; // positive = above
-            if (dyNorm > 0.03) activeWheel = 2;      // clearly above → wheel 2
-            else if (dyNorm < -0.03) activeWheel = 1; // clearly below → wheel 1
-            else activeWheel = this.state.get('currentWheel'); // in between → keep current
+            const cx = (1-cl2.x) * w; const cy2 = cl2.y * h;
+            // Two virtual wheel centers stacked vertically (30px apart)
+            const w1y = cy2 + 0.03 * h; // wheel 1: slightly below
+            const w2y = cy2 - 0.03 * h; // wheel 2: slightly above
+            const d1 = Math.hypot(ix2-cx, iy2-w1y);
+            const d2 = Math.hypot(ix2-cx, iy2-w2y);
+            if (d2 < d1 - 10) activeWheel = 2;
+            else if (d1 < d2 - 10) activeWheel = 1;
+            else activeWheel = this.state.get('currentWheel');
           }
           this.state.set('currentWheel', activeWheel);
 
