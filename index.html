@@ -949,10 +949,14 @@ class AudioEngine {
   }
 
   _baseUrl(soundName) {
+    // violin stays at root samples/, others in subfolders
+    if (soundName === 'violin') {
+      return 'https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/';
+    }
     return `https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/${soundName}/`;
   }
 
-  _buildSampleUrls(prefix) {
+  _buildSampleUrls(prefix, isRoot) {
     const urls = {};
     const notes = ['C','D','E','F','G','A','B'];
     for (let oct = 5; oct <= 6; oct++) {
@@ -989,7 +993,7 @@ class AudioEngine {
     this.ready = false;
 
     const sampleUrls = this._buildSampleUrls(soundName);
-    console.log('[Audio] Loading', soundName, Object.keys(sampleUrls).length, 'samples...');
+    console.log('[Audio] Loading', soundName, Object.keys(sampleUrls).length, 'samples from', this._baseUrl(soundName));
 
     this.sampler = new Tone.Sampler({
       urls: sampleUrls,
