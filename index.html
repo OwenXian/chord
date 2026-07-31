@@ -2028,20 +2028,28 @@ class App {
           const w = this.canvas.width, h = this.canvas.height;
           const fixedW = this.state.get('fixedWheel');
           const swapped = this.state.get('swapHands');
-          const rWristY = rightLm[0].y;
-          const activeWheel = rWristY < 0.5 ? 2 : 1;
-          this.state.set('currentWheel', activeWheel);
-
-          const numSectors = activeWheel === 1 ? 6 : 5;
-          const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
           const wheelR2 = Math.min(Math.min(w, h) * 0.17, 170);
-
-          // Index finger position in canvas coords
           const indexTip = rightLm[8];
           const ix2 = (1-indexTip.x) * w;
           const iy2 = indexTip.y * h;
 
-          // Wheel center: fixed position or hand center
+          // Active wheel: in fixed mode use index finger Y, otherwise wrist Y
+          let activeWheel;
+          if (fixedW) {
+            // Fixed mode: whichever wheel's center the index is closer to
+            const sideX = swapped ? w * 0.25 : w * 0.75;
+            const d1 = Math.hypot(ix2-sideX, iy2-h*0.7);
+            const d2 = Math.hypot(ix2-sideX, iy2-h*0.3);
+            activeWheel = d2 < d1 ? 2 : 1;
+          } else {
+            activeWheel = rightLm[0].y < 0.5 ? 2 : 1;
+          }
+          this.state.set('currentWheel', activeWheel);
+
+          const numSectors = activeWheel === 1 ? 6 : 5;
+          const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
+
+          // Wheel center + update wristPos for rendering
           let cx2, cy2;
           if (fixedW) {
             const sideX = swapped ? w * 0.25 : w * 0.75;
@@ -2053,10 +2061,10 @@ class App {
             cx2 = (1-cl.x) * w;
             cy2 = cl.y * h;
           }
+          // Update wristPos so canvas renders wheel at correct position
+          this.state.update({ wristPos: { x: cx2, y: cy2 } });
 
           const iDist = Math.hypot(ix2-cx2, iy2-cy2);
-
-          // Index finger anywhere in wheel range → detect sector
           if (iDist > 8 && iDist < wheelR2 + 30) {
             let angle = Math.atan2(ix2-cx2, -(iy2-cy2));
             if (angle < 0) angle += Math.PI*2;
