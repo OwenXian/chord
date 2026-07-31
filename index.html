@@ -1494,6 +1494,7 @@ class App {
     this.handsEverDetected = false;
     this.complexity = 'high';
     this._muted = false;
+    this._fistSilenced = false;
 
     this._setupUI();
     this._setupKeyboard();
@@ -2025,23 +2026,71 @@ class App {
 
         if (rightLm) {
           const w = this.canvas.width, h = this.canvas.height;
+          const fixedW = this.state.get('fixedWheel');
+          const swapped = this.state.get('swapHands');
           const rWristY = rightLm[0].y;
           const activeWheel = rWristY < 0.5 ? 2 : 1;
           this.state.set('currentWheel', activeWheel);
 
           const numSectors = activeWheel === 1 ? 6 : 5;
           const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
-          const wheelResult = this.wheelDetector.process(rightLm, w, h, numSectors, chordTypes);
-          if (wheelResult?.type === 'chordTypeChange') {
-            this._onTypeChange(wheelResult.chordType, rightLm);
+          const wheelR2 = Math.min(Math.min(w, h) * 0.17, 170);
+
+          // Index finger position in canvas coords
+          const indexTip = rightLm[8];
+          const ix2 = (1-indexTip.x) * w;
+          const iy2 = indexTip.y * h;
+
+          // Wheel center: fixed position or hand center
+          let cx2, cy2;
+          if (fixedW) {
+            const sideX = swapped ? w * 0.25 : w * 0.75;
+            if (activeWheel === 2) { cx2 = sideX; cy2 = h * 0.3; }
+            else { cx2 = sideX; cy2 = h * 0.7; }
+          } else {
+            const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
+            const cl = rightLm[cIdx] || rightLm[9];
+            cx2 = (1-cl.x) * w;
+            cy2 = cl.y * h;
           }
 
-          const wristX = rightLm[0].x;
-          if (this.waveDetector.process(wristX)) {
-            const cur = this.state.get('missingHandBehavior');
-            this.state.set('missingHandBehavior', cur==='sustain'?'mute':'sustain');
+          const iDist = Math.hypot(ix2-cx2, iy2-cy2);
+
+          // Index finger anywhere in wheel range → detect sector
+          if (iDist > 8 && iDist < wheelR2 + 30) {
+            let angle = Math.atan2(ix2-cx2, -(iy2-cy2));
+            if (angle < 0) angle += Math.PI*2;
+            const secAngle = (Math.PI*2)/numSectors;
+            const rawSec = Math.floor(angle / secAngle);
+            if (rawSec >= 0 && rawSec < numSectors) {
+              const ct = chordTypes[rawSec];
+              if (ct && ct !== this.state.get('currentType')) {
+                this.state.set('currentType', ct);
+                this.state.set('activeSector', rawSec);
+                this.state.set('lockedSector', rawSec);
+                this.state.set('currentWheel', activeWheel);
+                this._onTypeChange(ct, rightLm);
+              }
+            }
           }
         }
+      }
+
+      // ---- Fist detection: both hands clenched → silence ----
+      if (leftLm && rightLm) {
+        const lExt = this.gestureRec.classify(leftLm).extensions;
+        const rExt = this.gestureRec.classify(rightLm).extensions;
+        const allClosed = !lExt.thumb && !lExt.index && !lExt.middle && !lExt.ring && !lExt.pinky &&
+                          !rExt.thumb && !rExt.index && !rExt.middle && !rExt.ring && !rExt.pinky;
+        if (allClosed && !this._fistSilenced) {
+          this._fistSilenced = true;
+          this.audio.fadeOut(0.3);
+        } else if (!allClosed && this._fistSilenced) {
+          this._fistSilenced = false;
+          this.audio.fadeIn(0.3);
+        }
+      } else {
+        this._fistSilenced = false;
       }
     }
 
