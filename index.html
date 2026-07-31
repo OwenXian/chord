@@ -979,6 +979,7 @@ class AudioEngine {
       attack: 0.1,
       release: 0.5,
       curve: 'exponential',
+      maxPolyphony: 32,
     };
 
     const samplerA = new Tone.Sampler(opts);
@@ -1019,9 +1020,11 @@ class AudioEngine {
       try { this.samplers[active].releaseAll(); } catch(e) {}
     }, CONFIG.chordReleaseDelay * 1000);
 
-    // Trigger new chord
+    // Trigger each note individually for reliable polyphony
     try {
-      this.samplers[inactive].triggerAttack(notes, undefined, velocity);
+      for (const n of notes) {
+        this.samplers[inactive].triggerAttack(n, undefined, velocity);
+      }
     } catch(e) { console.error('[Audio]', e); }
 
     // Crossfade
