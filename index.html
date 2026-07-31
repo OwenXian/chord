@@ -319,7 +319,7 @@ body {
 </div>
 
 <!-- Camera + Canvas -->
-<video id="video" autoplay playsinline></video>
+<video id="video" autoplay playsinline muted webkit-playsinline></video>
 <canvas id="canvas"></canvas>
 
 <!-- Chord Display -->
@@ -1943,11 +1943,14 @@ class App {
   loop(timestamp) {
     this.animFrameId = requestAnimationFrame((t)=>this.loop(t));
 
-    // Skip if video not ready (mobile)
-    if (this.video.readyState < 2) return;
-
     const dt = (timestamp - this.lastFrameTime) / 1000;
     this.lastFrameTime = timestamp;
+
+    // Skip detection if video not ready, but keep loop alive
+    if (this.video.readyState < 2) {
+      this.renderer.draw({ left:null, right:null }, this.complexity);
+      return;
+    }
 
     // FPS tracking
     this.fpsTimes.push(timestamp);
@@ -2043,46 +2046,34 @@ class App {
           const ix2 = (1-indexTip.x) * w;
           const iy2 = indexTip.y * h;
 
-          // Active wheel: in fixed mode use index finger Y, otherwise wrist Y
-          let activeWheel;
-          if (fixedW) {
-            // Fixed mode: whichever wheel's center the index is closer to
-            const sideX = swapped ? w * 0.25 : w * 0.75;
-            const d1 = Math.hypot(ix2-sideX, iy2-h*0.7);
-            const d2 = Math.hypot(ix2-sideX, iy2-h*0.3);
-            activeWheel = d2 < d1 ? 2 : 1;
-          } else {
-            // Non-fixed: check which wheel's center the index finger is closer to
-            const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
-            const cl2 = rightLm[cIdx] || rightLm[9];
-            const cx = (1-cl2.x) * w; const cy2 = cl2.y * h;
-            // Two virtual wheel centers stacked vertically (30px apart)
-            const w1y = cy2 + 0.03 * h; // wheel 1: slightly below
-            const w2y = cy2 - 0.03 * h; // wheel 2: slightly above
-            const d1 = Math.hypot(ix2-cx, iy2-w1y);
-            const d2 = Math.hypot(ix2-cx, iy2-w2y);
-            if (d2 < d1 - 10) activeWheel = 2;
-            else if (d1 < d2 - 10) activeWheel = 1;
-            else activeWheel = this.state.get('currentWheel');
-          }
-          this.state.set('currentWheel', activeWheel);
-
-          const numSectors = activeWheel === 1 ? 6 : 5;
-          const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
-
-          // Wheel center + update wristPos for rendering
-          let cx2, cy2;
+          // --- Compute wheel centers (separated vertically) ---
+          let cx2, cy2_w1, cy2_w2;
           if (fixedW) {
             const sideX = swapped ? w * 0.25 : w * 0.75;
-            if (activeWheel === 2) { cx2 = sideX; cy2 = h * 0.3; }
-            else { cx2 = sideX; cy2 = h * 0.7; }
+            cx2 = sideX;
+            cy2_w1 = h * 0.7;
+            cy2_w2 = h * 0.3;
           } else {
             const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
             const cl = rightLm[cIdx] || rightLm[9];
             cx2 = (1-cl.x) * w;
-            cy2 = cl.y * h;
+            const baseY = cl.y * h;
+            cy2_w1 = baseY + 0.05 * h;
+            cy2_w2 = baseY - 0.05 * h;
           }
-          // Update wristPos for canvas wheel rendering
+
+          // --- Active wheel: whichever center index finger is closer to ---
+          const d1 = Math.hypot(ix2-cx2, iy2-cy2_w1);
+          const d2 = Math.hypot(ix2-cx2, iy2-cy2_w2);
+          let activeWheel;
+          if (d2 < d1 - 20) activeWheel = 2;
+          else if (d1 < d2 - 20) activeWheel = 1;
+          else activeWheel = this.state.get('currentWheel');
+          this.state.set('currentWheel', activeWheel);
+
+          const numSectors = activeWheel === 1 ? 6 : 5;
+          const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
+          const cy2 = activeWheel === 2 ? cy2_w2 : cy2_w1;
           this.state.update({ wristPos: { x: cx2, y: cy2, useMapped: true } });
 
           const iDist = Math.hypot(ix2-cx2, iy2-cy2);
