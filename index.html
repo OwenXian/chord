@@ -359,6 +359,10 @@ body {
 <!-- Menu popup -->
 <div id="menu-popup">
   <div class="menu-content">
+    <select id="sound-select" style="padding:6px 10px;border-radius:16px;background:#1a1a2e;color:#fff;border:1px solid rgba(255,255,255,0.2);font-size:12px;cursor:pointer;">
+      <option value="violin">violin</option>
+      <option value="piano">piano</option>
+    </select>
     <button class="menu-btn" id="btn-single-hand">👆 Single Hand</button>
     <button class="menu-btn" id="btn-lock-chord">🔒 Lock Chord</button>
     <button class="menu-btn" id="btn-wheel-center">🎯 Pick Center</button>
@@ -940,24 +944,28 @@ class AudioEngine {
     this.reverb = null;
     this.ready = false;
     this.sampler = null;
-    this.currentNotes = [];
+    this.currentSound = null;
+    this.soundList = [];
   }
 
-  _buildSampleUrls() {
+  _baseUrl(soundName) {
+    return `https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/${soundName}/`;
+  }
+
+  _buildSampleUrls(prefix) {
     const urls = {};
-    // Only natural notes (user's available samples)
     const notes = ['C','D','E','F','G','A','B'];
     for (let oct = 5; oct <= 6; oct++) {
       for (const n of notes) {
         const name = n + oct;
         if (oct === 6 && notes.indexOf(n) > notes.indexOf('G')) break;
-        urls[name] = `violin-${n}${oct}.wav`;
+        urls[name] = `${prefix}-${n}${oct}.wav`;
       }
     }
     return urls;
   }
 
-  async init() {
+  async init(soundName = 'violin') {
     console.log('[Audio] Starting Sampler...');
     await Tone.start();
     const ctx = Tone.getContext().rawContext;
@@ -968,31 +976,38 @@ class AudioEngine {
     this.reverb.connect(this.masterGain);
     await this.reverb.generate();
 
-    const sampleUrls = this._buildSampleUrls();
-    const baseUrl = 'https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/';
-    console.log('[Audio] Loading', Object.keys(sampleUrls).length, 'samples...');
+    await this._loadSampler(soundName);
+  }
+
+  async _loadSampler(soundName) {
+    if (this.sampler) {
+      this.sampler.releaseAll();
+      this.sampler.disconnect();
+      this.sampler.dispose();
+    }
+    this.currentSound = soundName;
+    this.ready = false;
+
+    const sampleUrls = this._buildSampleUrls(soundName);
+    console.log('[Audio] Loading', soundName, Object.keys(sampleUrls).length, 'samples...');
 
     this.sampler = new Tone.Sampler({
       urls: sampleUrls,
-      baseUrl: baseUrl,
+      baseUrl: this._baseUrl(soundName),
       attack: 0.1,
       release: 0.5,
       curve: 'exponential',
       maxPolyphony: 64,
-      onload: () => {
-        console.log('[Audio] All samples loaded');
-        this.ready = true;
-      },
+      onload: () => { console.log('[Audio]', soundName, 'ready'); this.ready = true; },
     });
     this.sampler.connect(this.reverb);
 
-    // Fallback timeout
-    setTimeout(() => {
-      if (!this.ready) {
-        console.warn('[Audio] Sample load timed out, forcing ready');
-        this.ready = true;
-      }
-    }, 20000);
+    setTimeout(() => { if (!this.ready) { this.ready = true; } }, 20000);
+  }
+
+  async switchSound(soundName) {
+    if (soundName === this.currentSound) return;
+    await this._loadSampler(soundName);
   }
 
   getNotes(root, type, semitone) {
@@ -1005,7 +1020,6 @@ class AudioEngine {
     if (!this.ready) return;
     const notes = this.getNotes(root, type, semitone);
     console.log('[Audio]', root, type, notes.join(' '));
-    // Simple: release old, trigger new as a batch
     this.sampler.releaseAll(Tone.now());
     this.sampler.triggerAttack(notes, Tone.now() + 0.03, velocity);
   }
@@ -1589,6 +1603,15 @@ class App {
     });
 
     // ---- UI buttons ----
+    // Sound selector
+    const soundSelect = document.getElementById('sound-select');
+    soundSelect.addEventListener('change', async () => {
+      soundSelect.disabled = true;
+      await this.audio.switchSound(soundSelect.value);
+      soundSelect.disabled = false;
+      this._triggerChordFromState();
+    });
+
     // Menu toggle
     document.getElementById('btn-menu').addEventListener('click', ()=>{
       document.getElementById('menu-popup').classList.toggle('show');
