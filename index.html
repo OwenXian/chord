@@ -383,7 +383,7 @@ body {
       <tr><td>🖐️</td><td>四指并拢</td><td>→ F</td></tr>
       <tr><td>✋</td><td>五指全开</td><td>→ G</td></tr>
       <tr><td>👍</td><td>仅拇指</td><td>→ A</td></tr>
-      <tr><td>🤙</td><td>拇指+小指</td><td>→ B</td></tr>
+      <tr><td>👍☝️</td><td>拇指+食指</td><td>→ B</td></tr>
     </table>
     <h3 style="margin-top:20px;">🎡 右手轮盘 → 和弦</h3>
     <table>
@@ -517,7 +517,7 @@ const GESTURE_ROOTS = {
   four_fingers:            'F',
   all_five:                'G',
   thumb_only:              'A',
-  thumb_pinky:             'B',
+  thumb_index:             'B',
 };
 
 const ROOT_MIDI = { C:72,'C#':73,D:74,'D#':75,E:76,F:77,'F#':78,G:79,'G#':80,A:81,'A#':82,B:83 };
@@ -644,10 +644,15 @@ class CameraManager {
       return null;
     }
     try {
-      // Simplest possible camera request first
       console.log('[Camera] Requesting camera...');
+      // Mobile-friendly constraints
+      const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
       this.stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user' }
+        video: {
+          facingMode: 'user',
+          width: { ideal: isMobile ? 480 : 640 },
+          height: { ideal: isMobile ? 640 : 480 }
+        }
       });
       console.log('[Camera] Stream obtained:', this.stream.getVideoTracks()[0]?.label);
       this.video.srcObject = this.stream;
@@ -821,7 +826,7 @@ class GestureRecognizer {
       0b00001: 'index_only',      0b00011: 'index_middle',
       0b00111: 'index_middle_ring', 0b01111: 'four_fingers',
       0b11111: 'all_five',        0b10000: 'thumb_only',
-      0b11000: 'thumb_pinky',
+      0b10001: 'thumb_index',   // B
     };
     return { gesture: gestureMap[bm] || null, extensions: ext, bitmask: bm };
   }
@@ -1243,8 +1248,8 @@ class CanvasRenderer {
         // Outer ring (brighter for active wheel)
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI*2);
-        ctx.strokeStyle = isActiveWheel ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = isActiveWheel ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = isActiveWheel ? 2 : 1;
         ctx.stroke();
 
         const sectorAngle = (Math.PI*2)/wh.n;
@@ -1263,7 +1268,7 @@ class CanvasRenderer {
           ctx.moveTo(0,0);
           ctx.arc(0, 0, r, startA, endA);
           ctx.closePath();
-          const alpha = isActiveWheel ? (isLocked ? 0.5 : isHovered ? 0.35 : 0.12) : 0.06;
+          const alpha = isActiveWheel ? (isLocked ? 0.5 : isHovered ? 0.35 : 0.12) : 0.03;
           ctx.fillStyle = rgbToCss(...colorRgb, alpha);
           ctx.fill();
 
@@ -1287,7 +1292,7 @@ class CanvasRenderer {
           const midA = startA + sectorAngle/2;
           const lx = Math.cos(midA) * r * 0.62;
           const ly = Math.sin(midA) * r * 0.62;
-          ctx.fillStyle = isActiveWheel ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
+          ctx.fillStyle = isActiveWheel ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.12)';
           const fSize = wh.id === 2 ? Math.round(r * 0.11) : Math.round(r * 0.14);
           ctx.font = `bold ${fSize}px monospace`;
           ctx.textAlign = 'center';
@@ -1309,7 +1314,7 @@ class CanvasRenderer {
 
         ctx.beginPath();
         ctx.arc(0, 0, 3, 0, Math.PI*2);
-        ctx.fillStyle = isActiveWheel ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.15)';
+        ctx.fillStyle = isActiveWheel ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.06)';
         ctx.fill();
 
         ctx.restore();
@@ -2046,7 +2051,10 @@ class App {
             const d2 = Math.hypot(ix2-sideX, iy2-h*0.3);
             activeWheel = d2 < d1 ? 2 : 1;
           } else {
-            activeWheel = rightLm[0].y < 0.5 ? 2 : 1;
+            // Non-fixed: index finger above center → wheel 2, below → wheel 1
+            const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
+            const cl2 = rightLm[cIdx] || rightLm[9];
+            activeWheel = indexTip.y < cl2.y ? 2 : 1;
           }
           this.state.set('currentWheel', activeWheel);
 
