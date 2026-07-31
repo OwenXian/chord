@@ -1265,10 +1265,12 @@ class CanvasRenderer {
       const activeWheel = st.get('currentWheel');
       const fixedWheel = st.get('fixedWheel');
 
-      // Define both wheels: { numSectors, types, labels, fixedX, fixedY, name }
+      // Wheel positions flip when hands swapped
+      const swapped = st.get('swapHands');
+      const sideX = swapped ? w * 0.25 : w * 0.75;
       const wheels = [
-        { n:6, types:CHORD_TYPES_1, labels:CHORD_LABELS_1, fx:w*0.75, fy:h*0.7, id:1 },
-        { n:5, types:CHORD_TYPES_2, labels:CHORD_LABELS_2, fx:w*0.75, fy:h*0.3, id:2 },
+        { n:6, types:CHORD_TYPES_1, labels:CHORD_LABELS_1, fx:sideX, fy:h*0.7, id:1 },
+        { n:5, types:CHORD_TYPES_2, labels:CHORD_LABELS_2, fx:sideX, fy:h*0.3, id:2 },
       ];
 
       for (const wh of wheels) {
@@ -1587,18 +1589,16 @@ class App {
 
       // Touch mode: tap wheel sectors
       if (this.state.get('touchMode')) {
-        const fixedW = this.state.get('fixedWheel');
-        const activeW = this.state.get('currentWheel');
-        // Fixed wheel positions
-        const wheel1Pos = { x: this.canvas.width * 0.75, y: this.canvas.height * 0.7 };
-        const wheel2Pos = { x: this.canvas.width * 0.75, y: this.canvas.height * 0.3 };
+        const swapped = this.state.get('swapHands');
+        const sideX = swapped ? this.canvas.width * 0.25 : this.canvas.width * 0.75;
+        const wheel1Pos = { x: sideX, y: this.canvas.height * 0.7 };
+        const wheel2Pos = { x: sideX, y: this.canvas.height * 0.3 };
         const rr = Math.min(this.canvas.width, this.canvas.height) * 0.20;
         const r = Math.min(rr, 195);
 
         for (const wh of [{n:6, types:CHORD_TYPES_1, pos:wheel1Pos, id:1}, {n:5, types:CHORD_TYPES_2, pos:wheel2Pos, id:2}]) {
-          const pos = fixedW ? wh.pos : (activeW === wh.id ? this.state.get('wristPos') : wh.pos);
-          const dx = mx - pos.x, dy = my - pos.y, dist = Math.hypot(dx, dy);
-          if (dist < r && dist > 10) {
+          const dx = mx - wh.pos.x, dy = my - wh.pos.y, dist = Math.hypot(dx, dy);
+          if (dist < r && dist > 8) {
             let angle = Math.atan2(dx, -dy);
             if (angle < 0) angle += Math.PI*2;
             const sector = Math.floor(angle / (Math.PI*2 / wh.n));
@@ -1606,6 +1606,7 @@ class App {
               this.state.set('currentWheel', wh.id);
               this.state.set('currentType', wh.types[sector]);
               this.state.set('activeSector', sector);
+              this.state.set('lockedSector', sector);
               this._triggerChordFromState();
               return;
             }
@@ -2029,34 +2030,28 @@ class App {
       this._runCalibration(leftLm);
     }
 
-    // ---- Gesture Recognition (skip if touch mode) ----
-    if (this.state.get('touchMode')) {
-      // Touch mode: all gesture processing skipped
-    } else if (calPhase === 'done' || calPhase === 'idle') {
+    // ---- Gesture Recognition (fully skip in touch mode) ----
+    if (!this.state.get('touchMode') && (calPhase === 'done' || calPhase === 'idle')) {
       const singleHand = this.state.get('singleHandMode');
 
       if (singleHand) {
-        // Single-hand mode: use left (or only) hand for root via gestures
         const hand = leftLm || rightLm;
         if (hand) {
           const result = this.gestureRec.process(hand);
           if (result?.type === 'rootChange') {
             this._onRootChange(result.root, hand);
           }
-          // Chord type from horizontal position
-          const wristX = hand[0].x; // 0-1 normalized
+          const wristX = hand[0].x;
           const typeIdx = Math.floor(wristX * CHORD_TYPES_1.length);
           const ct = CHORD_TYPES_1[Math.min(typeIdx, CHORD_TYPES_1.length-1)];
           if (ct !== this.state.get('currentType')) {
             this.state.set('currentType', ct);
             this._onTypeChange(ct, hand);
           }
-          // Velocity
           const vel = this.gestureRec.computeVelocity(hand);
           this.state.set('currentVelocity', vel);
         }
       } else {
-        // Dual-hand mode
         if (leftLm) {
           const result = this.gestureRec.process(leftLm);
           if (result?.type === 'rootChange') {
@@ -2065,22 +2060,18 @@ class App {
           const vel = this.gestureRec.computeVelocity(leftLm);
           this.state.set('currentVelocity', vel);
 
-          // Semitone shift from LEFT hand height (♯ zone enlarged)
           const lWristY = leftLm[0].y;
           let semitone = 0;
-          if (lWristY < 0.5) semitone = 1;        // top half → ♯
-          else if (lWristY > 0.8) semitone = -1;  // bottom 20% → ♭
+          if (lWristY < 0.5) semitone = 1;
+          else if (lWristY > 0.8) semitone = -1;
           if (semitone !== this.state.get('currentSemitone')) {
             this.state.set('currentSemitone', semitone);
             this._triggerChordFromState();
           }
         }
 
-        // Right hand → wheel (hand height determines which wheel)
         if (rightLm) {
           const w = this.canvas.width, h = this.canvas.height;
-
-          // Hand in top half → wheel 2, bottom half → wheel 1
           const rWristY = rightLm[0].y;
           const activeWheel = rWristY < 0.5 ? 2 : 1;
           this.state.set('currentWheel', activeWheel);
@@ -2092,13 +2083,10 @@ class App {
             this._onTypeChange(wheelResult.chordType, rightLm);
           }
 
-          // Wave detection for mode toggle
           const wristX = rightLm[0].x;
           if (this.waveDetector.process(wristX)) {
             const cur = this.state.get('missingHandBehavior');
             this.state.set('missingHandBehavior', cur==='sustain'?'mute':'sustain');
-            document.getElementById('btn-hand-mode').textContent =
-              (cur==='sustain'?'🔇 Mute on Loss':'🔊 Sustain on Loss');
           }
         }
       }
