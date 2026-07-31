@@ -48,9 +48,8 @@ body {
 #video {
   position: absolute; top: 0; left: 0;
   width: 100%; height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   transform: scaleX(-1);
-  background: #000;
   /* no filter */
   z-index: 1;
 }
@@ -1118,25 +1117,6 @@ class CanvasRenderer {
     this.canvas.width = w;
     this.canvas.height = h;
   }
-  setVideoSize(vw, vh) {
-    this.videoW = vw;
-    this.videoH = vh;
-  }
-  // Convert video normalized coords (0-1) to canvas pixel coords
-  _vidToCanvas(nx, ny) {
-    const cw = this.canvas.width, ch = this.canvas.height;
-    const vw = this.videoW || 640, vh = this.videoH || 480;
-    const va = vw / vh, ca = cw / ch;
-    let vx, vy, vdisplayW, vdisplayH;
-    if (va > ca) {
-      vdisplayH = ch; vdisplayW = ch * va;
-      vx = (cw - vdisplayW) / 2; vy = 0;
-    } else {
-      vdisplayW = cw; vdisplayH = cw / va;
-      vx = 0; vy = (ch - vdisplayH) / 2;
-    }
-    return { x: vx + nx * vdisplayW, y: vy + ny * vdisplayH };
-  }
 
   triggerRootParticles(x, y) {
     const clr = this.state.get('currentType');
@@ -1187,9 +1167,8 @@ class CanvasRenderer {
 
     for (const hand of hands) {
       const lm = hand.lm;
-      // Map video coords to canvas, mirroring X
-      const pts = lm.map(l => this._vidToCanvas(1-l.x, l.y));
-      const isCenterHand = (hand.label === 'R'); // right hand for wheel center
+      // Mirror X for canvas
+      const pts = lm.map(l=>({x:(1-l.x)*w, y:l.y*h}));
 
       // Connections
       ctx.strokeStyle = hand.label==='L'
@@ -1916,9 +1895,8 @@ class App {
         console.warn('[App] Camera unavailable:', this.camera.lastError);
       }
     }
-    // Canvas at viewport, renderer handles video→canvas mapping
+    // Canvas matches viewport
     this.renderer.resize(window.innerWidth, window.innerHeight);
-    this.renderer.setVideoSize(res ? res.w : 640, res ? res.h : 480);
     window.addEventListener('resize', () => {
       this.renderer.resize(window.innerWidth, window.innerHeight);
     });
@@ -2061,8 +2039,8 @@ class App {
           const swapped = this.state.get('swapHands');
           const wheelR2 = Math.min(Math.min(w, h) * 0.17, 170);
           const indexTip = rightLm[8];
-          const ixy = this.renderer._vidToCanvas(1-indexTip.x, indexTip.y);
-          const ix2 = ixy.x, iy2 = ixy.y;
+          const ix2 = (1-indexTip.x) * w;
+          const iy2 = indexTip.y * h;
 
           // Active wheel: in fixed mode use index finger Y, otherwise wrist Y
           let activeWheel;
@@ -2095,8 +2073,8 @@ class App {
           } else {
             const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
             const cl = rightLm[cIdx] || rightLm[9];
-            const cxy = this.renderer._vidToCanvas(1-cl.x, cl.y);
-            cx2 = cxy.x; cy2 = cxy.y;
+            cx2 = (1-cl.x) * w;
+            cy2 = cl.y * h;
           }
           // Update wristPos for canvas wheel rendering
           this.state.update({ wristPos: { x: cx2, y: cy2, useMapped: true } });
