@@ -92,10 +92,10 @@ body {
   border-radius: 2px;
 }
 #btn-start {
-  padding: 14px 48px; font-size: 16px; letter-spacing: 0.1em;
-  border: 1px solid rgba(255,255,255,0.3);
-  background: rgba(255,255,255,0.06);
-  color: #fff; cursor: pointer; border-radius: 30px;
+  padding: 18px 56px; font-size: 18px; letter-spacing: 0.08em;
+  border: 2px solid rgba(255,255,255,0.4);
+  background: rgba(255,140,66,0.15);
+  color: #fff; cursor: pointer; border-radius: 34px;
   transition: all 0.3s ease;
   opacity: 0.5; pointer-events: none;
 }
@@ -306,7 +306,7 @@ body {
   <h1>手势和弦乐器</h1>
   <div class="subtitle">GESTURE CHORD INSTRUMENT</div>
   <div id="progress-bar"><div id="progress-fill"></div></div>
-  <button id="btn-start">▸ 开始体验 START</button>
+  <button id="btn-start">👆 点击开始 Tap to Start</button>
   <div class="loader-text" id="loader-text">Loading model…</div>
   <button id="btn-skip" style="display:none;background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;margin-top:14px;font-size:12px;text-decoration:underline;">Skip camera — keyboard only</button>
 </div>
@@ -1247,17 +1247,16 @@ class CanvasRenderer {
         { n:5, types:CHORD_TYPES_2, labels:CHORD_LABELS_2, fx:sideX, fy:h*0.3, id:2 },
       ];
 
+      const wp = st.get('wristPos');
       for (const wh of wheels) {
         const isActiveWheel = (wh.id === activeWheel);
         let wx, wy;
         if (fixedWheel) {
           wx = wh.fx; wy = wh.fy;
-        } else if (isActiveWheel) {
-          wx = st.get('wristPos').x;
-          wy = st.get('wristPos').y;
         } else {
-          // Inactive wheel stays at its fixed position
-          wx = wh.fx; wy = wh.fy;
+          // Both wheels follow hand, but offset vertically
+          wx = wp.x;
+          wy = isActiveWheel ? wp.y : (wh.id === 2 ? wp.y - 0.04 * h : wp.y + 0.04 * h);
         }
 
         ctx.save();
@@ -1860,11 +1859,13 @@ class App {
     }
 
     // Load hand tracker with timeout fallback
+    const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+    const timeoutMs = isMobile ? 10000 : 25000;
     const loadTimeout = new Promise((resolve) => {
       setTimeout(() => {
-        console.warn('[App] Model load timed out after 25s — switching to keyboard-only mode');
+        console.warn('[App] Model load timed out — keyboard-only');
         resolve('timeout');
-      }, 25000);
+      }, timeoutMs);
     });
 
     const loadTask = this.handTracker.load((pct) => {
@@ -1918,6 +1919,14 @@ class App {
     window.addEventListener('resize', () => {
       this.renderer.resize(window.innerWidth, window.innerHeight);
     });
+    // Mobile: ensure AudioContext is really running
+    try {
+      const ctx = Tone.getContext().rawContext;
+      if (ctx.state !== 'running') await ctx.resume();
+      // Play an audible click to fully unlock mobile audio
+      const click = new Tone.Oscillator(880, 'sine').connect(new Tone.Gain(0.05).toDestination());
+      click.start().stop('+0.08');
+    } catch(e) { console.warn('Audio unlock:', e); }
     await audioPromise;
 
     if (res && shouldTryCamera) {
@@ -2074,39 +2083,28 @@ class App {
           const w = this.canvas.width, h = this.canvas.height;
           const fixedW = this.state.get('fixedWheel');
           const swapped = this.state.get('swapHands');
-          const wheelR2 = Math.min(Math.min(w, h) * 0.17, 170);
+          const wheelR2 = Math.min(Math.min(w, h) * 0.20, 195);
           const indexTip = rightLm[8];
           const ix2 = (1-indexTip.x) * w;
           const iy2 = indexTip.y * h;
 
-          // --- Compute wheel centers (separated vertically) ---
-          let cx2, cy2_w1, cy2_w2;
-          if (fixedW) {
-            const sideX = swapped ? w * 0.25 : w * 0.75;
-            cx2 = sideX;
-            cy2_w1 = h * 0.7;
-            cy2_w2 = h * 0.3;
-          } else {
-            const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
-            const cl = rightLm[cIdx] || rightLm[9];
-            cx2 = (1-cl.x) * w;
-            const baseY = cl.y * h;
-            cy2_w1 = baseY + 0.05 * h;
-            cy2_w2 = baseY - 0.05 * h;
-          }
+          // --- Wheel center at hand position ---
+          const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
+          const cl = rightLm[cIdx] || rightLm[9];
+          const cx2 = (1-cl.x) * w;
+          const cy2 = cl.y * h;
 
-          // --- Active wheel: whichever center index finger is closer to ---
-          const d1 = Math.hypot(ix2-cx2, iy2-cy2_w1);
-          const d2 = Math.hypot(ix2-cx2, iy2-cy2_w2);
-          let activeWheel;
-          if (d2 < d1 - 20) activeWheel = 2;
-          else if (d1 < d2 - 20) activeWheel = 1;
-          else activeWheel = this.state.get('currentWheel');
+          // --- Active wheel: wrist-based with strong hysteresis ---
+          const wristY = rightLm[0].y;
+          const prevWheel = this.state.get('currentWheel');
+          let activeWheel = prevWheel;
+          if (wristY < 0.35) activeWheel = 2;       // wrist clearly high
+          else if (wristY > 0.65) activeWheel = 1;  // wrist clearly low
+          // in between → keep previous wheel
           this.state.set('currentWheel', activeWheel);
 
           const numSectors = activeWheel === 1 ? 6 : 5;
           const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
-          const cy2 = activeWheel === 2 ? cy2_w2 : cy2_w1;
           this.state.update({ wristPos: { x: cx2, y: cy2, useMapped: true } });
 
           const iDist = Math.hypot(ix2-cx2, iy2-cy2);
@@ -2117,12 +2115,17 @@ class App {
             const rawSec = Math.floor(angle / secAngle);
             if (rawSec >= 0 && rawSec < numSectors) {
               const ct = chordTypes[rawSec];
-              if (ct && ct !== this.state.get('currentType')) {
+              if (ct && ct !== this.state.get('currentType') && !this.state.get('lockChordType')) {
                 this.state.set('currentType', ct);
                 this.state.set('activeSector', rawSec);
                 this.state.set('lockedSector', rawSec);
                 this.state.set('currentWheel', activeWheel);
                 this._onTypeChange(ct, rightLm);
+              } else if (ct && this.state.get('lockChordType')) {
+                // Still show which sector is hovered
+                this.state.set('activeSector', rawSec);
+                this.state.set('lockedSector', rawSec);
+                this.state.set('currentWheel', activeWheel);
               }
             }
           }
