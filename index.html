@@ -516,8 +516,8 @@ const GESTURE_ROOTS = {
   thumb_pinky:             'B',
 };
 
-const ROOT_MIDI = { C:60,'C#':61,D:62,'D#':63,E:64,F:65,'F#':66,G:67,'G#':68,A:69,'A#':70,B:71 };
-// C4-B4 range, chords extend into C5 (~262-523Hz)
+const ROOT_MIDI = { C:72,'C#':73,D:74,'D#':75,E:76,F:77,'F#':78,G:79,'G#':80,A:81,'A#':82,B:83 };
+// C5-B5 range, matches violin samples C5-G6
 
 const CONFIG = {
   wheelRadius: 120,
@@ -937,149 +937,103 @@ class AudioEngine {
   constructor(state) {
     this.state = state;
     this.activeBank = 'A';
-    this.synths = {};
-    this.gains = {};
     this.masterGain = null;
     this.reverb = null;
-    this.lowpass = null;
     this.ready = false;
+    this.samplers = {};
+    this.gains = {};
   }
 
-  // Convert MIDI number to note name like "C4", "Eb3"
-  midiToNote(midi) {
-    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-    const oct = Math.floor(midi / 12) - 1;
-    const name = names[midi % 12];
-    return name + oct;
+  _buildSampleUrls() {
+    const urls = {};
+    const notes = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    for (let oct = 5; oct <= 6; oct++) {
+      for (const n of notes) {
+        const name = n + oct;
+        if (oct === 6 && notes.indexOf(n) > notes.indexOf('G')) break;
+        urls[name] = `violin-${n}${oct}.wav`;
+      }
+    }
+    return urls;
   }
 
   async init() {
-    console.log('[Audio] Starting Tone.js...');
+    console.log('[Audio] Starting Sampler engine...');
     await Tone.start();
-    // Mobile: force AudioContext to running state
     const ctx = Tone.getContext().rawContext;
-    if (ctx.state !== 'running') {
-      await ctx.resume();
-    }
-    // Brief silent tone to unlock mobile audio
-    const warm = new Tone.Oscillator(440, 'sine').connect(new Tone.Gain(0.001).toDestination());
-    warm.start().stop('+0.05');
-    console.log('[Audio] Context state:', ctx.state);
+    if (ctx.state !== 'running') await ctx.resume();
+    console.log('[Audio] Context:', ctx.state);
 
-    // ---- Piano: clean triangle + sine, percussive envelope, light reverb ----
-    this.masterGain = new Tone.Gain(0.6).toDestination();
-
-    this.reverb = new Tone.Reverb({ decay: 1.2, wet: 0.2 });
+    this.masterGain = new Tone.Gain(0.55).toDestination();
+    this.reverb = new Tone.Reverb({ decay: 1.5, wet: 0.2 });
     this.reverb.connect(this.masterGain);
     await this.reverb.generate();
 
-    // Layer configs — smooth legato pad (no percussive attack)
-    const layers = [
-      { // Main body: soft attack for seamless chord transitions
-        name: 'strings',
-        vol: -8,
-        osc: { type: 'triangle' },
-        env: { attack: 0.12, decay: 0.6, sustain: 0.5, release: 0.8 }
-      },
-      { // Gentle harmonic layer
-        name: 'sub',
-        vol: -14,
-        osc: { type: 'sine' },
-        env: { attack: 0.1, decay: 0.5, sustain: 0.4, release: 0.6 }
-      },
-    ];
+    const sampleUrls = this._buildSampleUrls();
+    const baseUrl = 'https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/';
+    console.log('[Audio] Loading', Object.keys(sampleUrls).length, 'samples...');
 
-    for (const layer of layers) {
-      // Bank A — active (gain = 1)
-      const synthA = new Tone.PolySynth();
-      synthA.set({ oscillator: layer.osc, envelope: layer.env, volume: layer.vol });
-      const gainA = new Tone.Gain(1);
-      synthA.connect(gainA);
-      gainA.connect(this.reverb);
+    const opts = {
+      urls: sampleUrls,
+      baseUrl: baseUrl,
+      attack: 0.1,
+      release: 0.5,
+      curve: 'exponential',
+    };
 
-      // Bank B — standby (gain = 0)
-      const synthB = new Tone.PolySynth();
-      synthB.set({ oscillator: layer.osc, envelope: layer.env, volume: layer.vol });
-      const gainB = new Tone.Gain(0);
-      synthB.connect(gainB);
-      gainB.connect(this.reverb);
+    const samplerA = new Tone.Sampler(opts);
+    const gainA = new Tone.Gain(1);
+    samplerA.connect(gainA);
+    gainA.connect(this.reverb);
 
-      this.synths[`${layer.name}_A`] = synthA;
-      this.synths[`${layer.name}_B`] = synthB;
-      this.gains[`${layer.name}_A`] = gainA;
-      this.gains[`${layer.name}_B`] = gainB;
-    }
+    const samplerB = new Tone.Sampler(opts);
+    const gainB = new Tone.Gain(0);
+    samplerB.connect(gainB);
+    gainB.connect(this.reverb);
 
+    this.samplers = { A: samplerA, B: samplerB };
+    this.gains = { A: gainA, B: gainB };
+
+    // Wait for load
+    await new Promise(r => setTimeout(r, 8000));
     this.ready = true;
-    console.log('[Audio] Engine ready — 4 synths (2 layers × 2 banks)');
+    console.log('[Audio] Sampler ready');
   }
 
-  // Compute note names from root + chord type + semitone shift
   getNotes(root, type, semitone) {
-    const baseMIDI = (ROOT_MIDI[root] ?? 48) + (semitone || 0);
+    const baseMIDI = (ROOT_MIDI[root] ?? 60) + (semitone || 0);
     const intervals = CHORD_INTERVALS[type] || [0,4,7];
-    return intervals.map(i => this.midiToNote(baseMIDI + i));
+    return intervals.map(i => Tone.Frequency(i + baseMIDI, 'midi').toNote());
   }
 
-  // Trigger chord change with A/B crossfade
   triggerChord(root, type, semitone, velocity) {
-    if (!this.ready) {
-      console.warn('[Audio] Not ready, skipping trigger');
-      return;
-    }
-
+    if (!this.ready) return;
     const notes = this.getNotes(root, type, semitone);
-    const subNotes = notes.map(n => {
-      // Drop an octave: parse note name, subtract 12 from MIDI
-      const midi = Tone.Frequency(n).toMidi();
-      return this.midiToNote(midi - 12);
-    });
-
-    const inactive = this.activeBank === 'A' ? 'B' : 'A';
     const active = this.activeBank;
-    const layerNames = ['strings','sub'];
-    const noteSets = [notes, subNotes];
+    const inactive = active === 'A' ? 'B' : 'A';
 
-    console.log('[Audio] Chord:', root, type, 'st:', semitone, 'notes:', notes.join(' '));
+    console.log('[Audio]', root, type, notes.join(' '));
 
-    // Trigger notes on inactive bank
-    for (let i = 0; i < layerNames.length; i++) {
-      const synth = this.synths[`${layerNames[i]}_${inactive}`];
-      try {
-        synth.triggerAttack(noteSets[i], undefined, velocity);
-      } catch(e) {
-        console.error('[Audio] triggerAttack failed:', e);
-      }
-    }
+    // Old chord release after overlap
+    setTimeout(() => {
+      try { this.samplers[active].releaseAll(); } catch(e) {}
+    }, CONFIG.chordReleaseDelay * 1000);
+
+    // Trigger new chord
+    try {
+      this.samplers[inactive].triggerAttack(notes, undefined, velocity);
+    } catch(e) { console.error('[Audio]', e); }
 
     // Crossfade
-    const fadeTime = CONFIG.crossfadeMs;
-    for (const ln of layerNames) {
-      this.gains[`${ln}_${active}`].gain.rampTo(0, fadeTime);
-      this.gains[`${ln}_${inactive}`].gain.rampTo(1, fadeTime);
-    }
-
-    // Delay release of old chord for smooth overlap (18ms)
-    const releaseDelay = (fadeTime * 1000) + (CONFIG.chordReleaseDelay * 1000);
-    setTimeout(() => {
-      for (let i = 0; i < layerNames.length; i++) {
-        try {
-          this.synths[`${layerNames[i]}_${active}`].releaseAll();
-        } catch(e) { /* ignore */ }
-      }
-      this.activeBank = inactive;
-    }, releaseDelay);
+    this.gains[active].gain.rampTo(0, CONFIG.crossfadeMs);
+    this.gains[inactive].gain.rampTo(1, CONFIG.crossfadeMs);
+    this.activeBank = inactive;
   }
 
   silence() {
     if (!this.ready) return;
-    for (const key of Object.keys(this.synths)) {
-      try { this.synths[key].releaseAll(); } catch(e) { /* ignore */ }
-    }
-    for (const key of Object.keys(this.gains)) {
-      const isA = key.endsWith('_A');
-      this.gains[key].gain.value = isA ? (this.activeBank==='A'?1:0) : (this.activeBank==='B'?1:0);
-    }
+    try { this.samplers.A.releaseAll(); } catch(e) {}
+    try { this.samplers.B.releaseAll(); } catch(e) {}
   }
 
   fadeOut(duration) {
@@ -1087,7 +1041,7 @@ class AudioEngine {
   }
 
   fadeIn(duration) {
-    if (this.masterGain) this.masterGain.gain.rampTo(0.6, duration);
+    if (this.masterGain) this.masterGain.gain.rampTo(0.55, duration);
   }
 }
 
