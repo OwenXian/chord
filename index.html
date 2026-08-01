@@ -1253,9 +1253,12 @@ class CanvasRenderer {
         let wx, wy;
         if (fixedWheel) {
           wx = wh.fx; wy = wh.fy;
+        } else if (isActiveWheel) {
+          // Active wheel follows hand
+          wx = wp.x; wy = wp.y;
         } else {
-          wx = wp.x;
-          wy = wh.id === 2 ? wp.y - h * 0.07 : wp.y + h * 0.07;
+          // Inactive wheel: fixed standby position (not following hand)
+          wx = wh.fx; wy = wh.fy;
         }
 
         ctx.save();
@@ -2092,28 +2095,28 @@ class App {
           const cl = rightLm[cIdx] || rightLm[9];
           const cx2 = (1-cl.x) * w;
 
-          // Fixed mode: two wheels on right. Gesture mode: offset around hand.
-          let wheelCx = cx2, cy2_w1, cy2_w2;
-          if (fixedW) {
-            wheelCx = swapped ? w * 0.25 : w * 0.75;
-            cy2_w2 = h * 0.3; cy2_w1 = h * 0.7;
-          } else {
-            const baseY = cl.y * h;
-            cy2_w1 = baseY + h * 0.07;
-            cy2_w2 = baseY - h * 0.07;
-          }
-          this.state.update({ wristPos: { x: wheelCx, y: (cy2_w1+cy2_w2)/2 } });
+          // --- Two wheels: each at its own position ---
+          const sideX = swapped ? w * 0.25 : w * 0.75;
+          const baseY = cl.y * h;
+          const activeId = this.state.get('currentWheel');
 
-          // --- Check BOTH wheels: finger inside which one? ---
-          const d1 = Math.hypot(ix2-wheelCx, iy2-cy2_w1);
-          const d2 = Math.hypot(ix2-wheelCx, iy2-cy2_w2);
-          const candidates = [
-            { dist: d1, cy: cy2_w1, n:6, types:CHORD_TYPES_1, id:1 },
-            { dist: d2, cy: cy2_w2, n:5, types:CHORD_TYPES_2, id:2 }
-          ].sort((a,b) => a.dist - b.dist); // closest first
-          for (const wh of candidates) {
-            if (wh.dist > 8 && wh.dist < wheelR2 + 30) {
-              let angle = Math.atan2(ix2-wheelCx, -(iy2-wh.cy));
+          // Each wheel = { cx, cy, n, types, labels, id }
+          const whList = [
+            { cx: fixedW ? sideX : (activeId===1 ? cx2 : sideX),
+              cy: fixedW ? h*0.7 : (activeId===1 ? baseY : h*0.7),
+              n: 6, types: CHORD_TYPES_1, id: 1 },
+            { cx: fixedW ? sideX : (activeId===2 ? cx2 : sideX),
+              cy: fixedW ? h*0.3 : (activeId===2 ? baseY : h*0.3),
+              n: 5, types: CHORD_TYPES_2, id: 2 },
+          ];
+
+          this.state.update({ wristPos: { x: cx2, y: baseY } });
+
+          // Check both — activate whichever finger is in
+          for (const wh of whList) {
+            const d = Math.hypot(ix2-wh.cx, iy2-wh.cy);
+            if (d > 8 && d < wheelR2 + 30) {
+              let angle = Math.atan2(ix2-wh.cx, -(iy2-wh.cy));
               if (angle < 0) angle += Math.PI*2;
               const secAngle = (Math.PI*2)/wh.n;
               const rawSec = Math.floor(angle / secAngle);
@@ -2125,7 +2128,7 @@ class App {
                   this.state.set('currentType', ct);
                   this._onTypeChange(ct, rightLm);
                 }
-                break; // only one wheel at a time
+                break;
               }
             }
           }
