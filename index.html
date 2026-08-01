@@ -1256,7 +1256,7 @@ class CanvasRenderer {
         } else {
           // Both wheels follow hand, but offset vertically
           wx = wp.x;
-          wy = isActiveWheel ? wp.y : (wh.id === 2 ? wp.y - 0.04 * h : wp.y + 0.04 * h);
+          wy = wh.id === 2 ? wp.y - 0.08 * h : wp.y + 0.08 * h;
         }
 
         ctx.save();
@@ -2088,28 +2088,37 @@ class App {
           const ix2 = (1-indexTip.x) * w;
           const iy2 = indexTip.y * h;
 
-          // --- Wheel center at hand position ---
-          const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
-          const cl = rightLm[cIdx] || rightLm[9];
-          const cx2 = (1-cl.x) * w;
-          const cy2 = cl.y * h;
+          // --- Two wheel centers ---
+          let cx2, cy2_w1, cy2_w2;
+          if (fixedW) {
+            const sideX = swapped ? w * 0.25 : w * 0.75;
+            cx2 = sideX; cy2_w1 = h * 0.7; cy2_w2 = h * 0.3;
+          } else {
+            const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
+            const cl = rightLm[cIdx] || rightLm[9];
+            cx2 = (1-cl.x) * w;
+            const baseY = cl.y * h;
+            cy2_w1 = baseY + h * 0.08;
+            cy2_w2 = baseY - h * 0.08;
+          }
+          this.state.update({ wristPos: { x: cx2, y: (cy2_w1+cy2_w2)/2, useMapped: true } });
 
-          // --- Active wheel: wrist-based with strong hysteresis ---
-          const wristY = rightLm[0].y;
-          const prevWheel = this.state.get('currentWheel');
-          let activeWheel = prevWheel;
-          if (wristY < 0.35) activeWheel = 2;       // wrist clearly high
-          else if (wristY > 0.65) activeWheel = 1;  // wrist clearly low
-          // in between → keep previous wheel
+          // --- Active wheel: whichever center index finger is closer to ---
+          const distW1 = Math.hypot(ix2-cx2, iy2-cy2_w1);
+          const distW2 = Math.hypot(ix2-cx2, iy2-cy2_w2);
+          let activeWheel = this.state.get('currentWheel');
+          if (distW2 < wheelR2 && distW2 < distW1 - 15) activeWheel = 2;
+          else if (distW1 < wheelR2 && distW1 < distW2 - 15) activeWheel = 1;
           this.state.set('currentWheel', activeWheel);
 
+          const actCX = cx2;
+          const actCY = activeWheel === 2 ? cy2_w2 : cy2_w1;
           const numSectors = activeWheel === 1 ? 6 : 5;
           const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
-          this.state.update({ wristPos: { x: cx2, y: cy2, useMapped: true } });
 
-          const iDist = Math.hypot(ix2-cx2, iy2-cy2);
+          const iDist = Math.hypot(ix2-actCX, iy2-actCY);
           if (iDist > 8 && iDist < wheelR2 + 30) {
-            let angle = Math.atan2(ix2-cx2, -(iy2-cy2));
+            let angle = Math.atan2(ix2-actCX, -(iy2-actCY));
             if (angle < 0) angle += Math.PI*2;
             const secAngle = (Math.PI*2)/numSectors;
             const rawSec = Math.floor(angle / secAngle);
@@ -2119,13 +2128,10 @@ class App {
                 this.state.set('currentType', ct);
                 this.state.set('activeSector', rawSec);
                 this.state.set('lockedSector', rawSec);
-                this.state.set('currentWheel', activeWheel);
                 this._onTypeChange(ct, rightLm);
               } else if (ct && this.state.get('lockChordType')) {
-                // Still show which sector is hovered
                 this.state.set('activeSector', rawSec);
                 this.state.set('lockedSector', rawSec);
-                this.state.set('currentWheel', activeWheel);
               }
             }
           }
