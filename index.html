@@ -2076,21 +2076,25 @@ class App {
         }
       }
 
-      // ---- Fist detection: both hands clenched → silence ----
-      if (leftLm && rightLm) {
-        const lExt = this.gestureRec.classify(leftLm).extensions;
-        const rExt = this.gestureRec.classify(rightLm).extensions;
-        const allClosed = !lExt.thumb && !lExt.index && !lExt.middle && !lExt.ring && !lExt.pinky &&
-                          !rExt.thumb && !rExt.index && !rExt.middle && !rExt.ring && !rExt.pinky;
-        if (allClosed && !this._fistSilenced) {
+      // ---- Fist detection: ANY hand clenched → silence ----
+      const isFist = (lm) => {
+        if (!lm) return false;
+        const ext = this.gestureRec.classify(lm).extensions;
+        return !ext.thumb && !ext.index && !ext.middle && !ext.ring && !ext.pinky;
+      };
+      const anyFist = isFist(leftLm) || isFist(rightLm);
+      if (anyFist) {
+        if (!this._fistSilenced) {
           this._fistSilenced = true;
-          this.audio.fadeOut(0.3);
-        } else if (!allClosed && this._fistSilenced) {
-          this._fistSilenced = false;
-          this.audio.fadeIn(0.3);
+          this.audio.silence();
+          this.audio.fadeOut(0.05);
         }
-      } else {
+        // Skip all gesture/chord processing while fist is held
+        this.renderer.draw({ left:leftLm, right:rightLm }, this.complexity);
+        return;
+      } else if (this._fistSilenced) {
         this._fistSilenced = false;
+        this.audio.fadeIn(0.15);
       }
     }
 
