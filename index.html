@@ -206,10 +206,6 @@ body {
   0%,100% { box-shadow: 0 0 0 0 rgba(224,64,64,0.5); }
   50% { box-shadow: 0 0 0 12px rgba(224,64,64,0); }
 }
-@keyframes sample-loading {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
 
 /* ---- Menu Popup ---- */
 #menu-popup {
@@ -311,7 +307,7 @@ body {
   <div class="subtitle">GESTURE CHORD INSTRUMENT</div>
   <div id="progress-bar"><div id="progress-fill"></div></div>
     <div class="loader-text" id="loader-text">Loading model…</div>
-  <button id="btn-start">👆 点击开始 Tap to Start</button>
+  <button id="btn-start">开始体验</button>
   <button id="btn-skip" style="display:none;background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;margin-top:14px;font-size:12px;text-decoration:underline;">Skip camera — keyboard only</button>
 </div>
 
@@ -320,14 +316,6 @@ body {
   <div class="cal-title" id="cal-title">Make a fist ✊</div>
   <div class="cal-hint" id="cal-hint">Hold still for 2 seconds</div>
   <div class="cal-progress"><div class="cal-progress-fill" id="cal-progress-fill" style="width:0%"></div></div>
-</div>
-
-<!-- Sample loading progress -->
-<div id="sample-loading" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:80;display:none;text-align:center;">
-  <div id="sample-loading-text" style="color:#fff;font-size:14px;margin-bottom:8px;text-shadow:0 0 10px rgba(0,0,0,0.8);">Loading violin...</div>
-  <div style="width:240px;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">
-    <div id="sample-progress-fill" style="width:100%;height:100%;background:linear-gradient(90deg,#3CB89C,#FF8C42);border-radius:2px;animation:sample-loading 1.5s ease-in-out infinite;"></div>
-  </div>
 </div>
 
 <!-- Camera + Canvas -->
@@ -389,35 +377,52 @@ body {
 
 <!-- Help Modal -->
 <div id="help-modal">
-  <div class="modal-content">
-    <h3>🎹 左手手势 → 根音</h3>
+  <div class="modal-content" style="max-height:80vh;overflow-y:auto;padding:20px 24px;">
+    <h3>🎹 左手 → 根音</h3>
     <table>
-      <tr><td>☝️</td><td>食指</td><td>→ C</td></tr>
-      <tr><td>✌️</td><td>食指+中指</td><td>→ D</td></tr>
-      <tr><td>🤟</td><td>食指+中指+无名指</td><td>→ E</td></tr>
-      <tr><td>🖐️</td><td>四指并拢</td><td>→ F</td></tr>
-      <tr><td>✋</td><td>五指全开</td><td>→ G</td></tr>
-      <tr><td>👍</td><td>仅拇指</td><td>→ A</td></tr>
-      <tr><td>👍☝️</td><td>拇指+食指</td><td>→ B</td></tr>
+      <tr><td>☝️</td><td>食指</td><td>C</td></tr>
+      <tr><td>✌️</td><td>食指+中指</td><td>D</td></tr>
+      <tr><td>🤟</td><td>食指+中指+无名指</td><td>E</td></tr>
+      <tr><td>🖐️</td><td>四指并拢</td><td>F</td></tr>
+      <tr><td>✋</td><td>五指全开</td><td>G</td></tr>
+      <tr><td>👍</td><td>仅拇指</td><td>A</td></tr>
+      <tr><td>👍☝️</td><td>拇指+食指</td><td>B</td></tr>
     </table>
-    <h3 style="margin-top:20px;">🎡 右手轮盘 → 和弦</h3>
+    <p style="font-size:11px;color:rgba(255,255,255,0.5);text-align:center;margin:4px 0;">左手在上半屏→♯升半音 | 在下20%→♭降半音</p>
+
+    <h3 style="margin-top:16px;">🎡 右手 → 和弦</h3>
+    <p style="font-size:11px;color:rgba(255,255,255,0.5);text-align:center;margin:0 0 4px;">轮盘1（手腕在下）</p>
     <table>
-      <tr><td>M7</td><td>maj7</td></tr>
-      <tr><td>m7</td><td>min7</td></tr>
-      <tr><td>7</td><td>dominant 7</td></tr>
-      <tr><td>M</td><td>major</td></tr>
-      <tr><td>m</td><td>minor</td></tr>
-      <tr><td>+9</td><td>add9</td></tr>
+      <tr><td>Maj7</td><td>min7</td><td>7</td><td>Maj</td><td>min</td><td>add9</td></tr>
     </table>
-    <p style="font-size:12px;color:rgba(255,255,255,0.5);text-align:center;margin-top:12px;">
-      左手在上 → ♯升半音 &nbsp;|&nbsp; 左手在下 → ♭降半音
-    </p>
-    <p style="font-size:12px;color:rgba(255,255,255,0.4);text-align:center;margin-top:4px;">
-      🎹 左侧键盘: ASDFGHJ = C-B &nbsp;|&nbsp; 1-6 = 和弦类型
-    </p>
-    <p style="font-size:12px;color:rgba(255,255,255,0.4);text-align:center;margin-top:2px;">
-      🔊 右侧滑条 &nbsp;|&nbsp; 📍固定轮盘 &nbsp;|&nbsp; 🔒锁定和弦
-    </p>
+    <p style="font-size:11px;color:rgba(255,255,255,0.5);text-align:center;margin:6px 0 4px;">轮盘2（手腕在上）</p>
+    <table>
+      <tr><td>sus2</td><td>sus4</td><td>dim7</td><td>aug7</td><td>aug9</td></tr>
+    </table>
+
+    <h3 style="margin-top:16px;">🎛 按钮功能</h3>
+    <table>
+      <tr><td>🔊 Mute</td><td>静音/取消</td></tr>
+      <tr><td>📍 Fix Wheel</td><td>固定/移动轮盘</td></tr>
+      <tr><td>⏺ Rec</td><td>录制音频（含麦克风）</td></tr>
+      <tr><td>☰ Menu</td><td>打开功能菜单</td></tr>
+    </table>
+
+    <h3 style="margin-top:16px;">📋 菜单功能</h3>
+    <table>
+      <tr><td>音源选择</td><td>violin / piano 切换</td></tr>
+      <tr><td>👆 Single Hand</td><td>单手模式</td></tr>
+      <tr><td>🔒 Lock Chord</td><td>锁定和弦类型不变</td></tr>
+      <tr><td>🎯 Pick Center</td><td>点击手部点位选轮盘中心</td></tr>
+      <tr><td>🔄 Swap Hands</td><td>左右手功能互换</td></tr>
+      <tr><td>👈 Touch Mode</td><td>触屏模式（手势停用）</td></tr>
+      <tr><td>❓ Help</td><td>本说明</td></tr>
+    </table>
+
+    <h3 style="margin-top:16px;">⌨ 键盘</h3>
+    <p style="font-size:12px;color:rgba(255,255,255,0.7);text-align:center;">ASDFGHJ = C-B &nbsp;|&nbsp; 1-6 = 和弦类型</p>
+    <p style="font-size:12px;color:rgba(255,255,255,0.7);text-align:center;">✊✊ 双手握拳 = 静音</p>
+
     <button class="close-btn" id="btn-help-close">关闭 Close</button>
   </div>
 </div>
@@ -618,7 +623,7 @@ class StateManager extends Emitter {
       currentType: 'maj7',
       currentSemitone: 0,  // -1=♭, 0=natural, +1=♯
       currentWheel: 1,      // 1=lower wheel (6 types), 2=upper wheel (5 types)
-      fixedWheel: false,
+      fixedWheel: true,
       lockChordType: false,
       wheelCenterIdx: 0,   // selected landmark index (0-20)
       selectCenterMode: false,
@@ -985,6 +990,20 @@ class AudioEngine {
   _baseUrl(s) { return s==='violin' ? 'https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/' : `https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/${s}/`; }
   _buildUrls(p) { const u={}; const n=['C','D','E','F','G','A','B']; for(let o=5;o<=6;o++){for(const x of n){if(o===6&&n.indexOf(x)>n.indexOf('G'))break;u[x+o]=`${p}-${x}${o}.wav`;}} return u; }
 
+  async _load(snd) {
+    if(this.sampler){this.sampler.dispose();}
+    this.currentSound=snd; this.ready=false;
+    const urls=this._buildUrls(snd), base=this._baseUrl(snd);
+    console.log('[Audio] Loading',snd,Object.keys(urls).length,'samples');
+    await new Promise((resolve) => {
+      this.sampler=new Tone.Sampler({urls,baseUrl:base,attack:0.1,release:0.5,maxPolyphony:64,
+        onload:()=>{console.log('[Audio]',snd,'loaded');this.ready=true;resolve();}
+      });
+      this.sampler.connect(this.reverb);
+      setTimeout(()=>{if(!this.ready){this.ready=true;resolve();}},25000);
+    });
+  }
+
   async init(sound='violin') {
     await Tone.start(); const ctx=Tone.getContext().rawContext; if(ctx.state!=='running')await ctx.resume();
     this.masterGain=new Tone.Gain(0.5).toDestination();
@@ -992,31 +1011,19 @@ class AudioEngine {
     await this._load(sound);
   }
 
-  async _load(snd) {
-    if(this.sampler){this.sampler.dispose();}
-    this.currentSound=snd; this.ready=false;
-    const bar=document.getElementById('sample-loading'), txt=document.getElementById('sample-loading-text');
-    if(bar)bar.style.display='block'; if(txt)txt.textContent=`Loading ${snd}...`;
-    const urls=this._buildUrls(snd), base=this._baseUrl(snd);
-    this.sampler=new Tone.Sampler({urls,baseUrl:base,attack:0.1,release:0.5,maxPolyphony:64,onload:()=>{if(bar)bar.style.display='none';this.ready=true;}});
-    this.sampler.connect(this.reverb);
-    setTimeout(()=>{if(!this.ready){if(bar)bar.style.display='none';this.ready=true;}},25000);
-  }
-
   async switchSound(s) { if(s!==this.currentSound) await this._load(s); }
 
   getNotes(root,type,st) {
-    const b=(ROOT_MIDI[root]??60)+(st||0);
-    return CHORD_INTERVALS[type].map(i=>Tone.Frequency(i+b,'midi').toNote());
+    const b=(ROOT_MIDI[root]??72)+(st||0);
+    return CHORD_INTERVALS[type].map(i=>Tone.Frequency(b+i,'midi').toNote());
   }
 
   triggerChord(root,type,st,vel) {
-    if(!this.ready||!this.sampler||!this.sampler.loaded)return;
-    const notes=this.getNotes(root,type,st).filter(n=>{const m=Tone.Frequency(n).toMidi();return m>=72&&m<=91;});
-    if(!notes.length)return;
+    if(!this.ready||!this.sampler)return;
+    const notes=this.getNotes(root,type,st);
     console.log('[Audio]',root,type,notes.join(' '));
     this.sampler.releaseAll(Tone.now());
-    this.sampler.triggerAttack(notes,Tone.now()+0.03,vel);
+    notes.forEach(n => this.sampler.triggerAttack(n, undefined, vel));
   }
 
   silence() { if(this.ready)try{this.sampler.releaseAll();}catch(e){} }
@@ -1832,7 +1839,7 @@ class App {
       if (pct < 20) this.ui.loaderText.textContent = 'Loading WASM runtime (~8MB)…';
       else if (pct < 60) this.ui.loaderText.textContent = 'Downloading hand model (5MB)…';
       else if (pct < 100) this.ui.loaderText.textContent = 'Initializing…';
-      else this.ui.loaderText.textContent = 'Ready — click to start';
+      else this.ui.loaderText.textContent = '';
     });
 
     const result = await Promise.race([loadTask, loadTimeout]);
@@ -1851,9 +1858,6 @@ class App {
       }
     }
 
-    if (!this._modelFailed) {
-      this.ui.loaderText.textContent = 'Ready — click to start';
-    }
     this.ui.btnStart.classList.add('ready');
     this.ui.btnSkip.style.display = 'block';
   }
@@ -2047,56 +2051,63 @@ class App {
           const ix2 = (1-indexTip.x) * w;
           const iy2 = indexTip.y * h;
 
-          // --- Two wheels at offset positions ---
+          // --- Wheel detection ---
           const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
           const cl = rightLm[cIdx] || rightLm[9];
-          const cx2 = (1-cl.x) * w;
+          const sideX = swapped ? w * 0.25 : w * 0.75;
 
-          const activeWheel = rightLm[0].y < 0.5 ? 2 : 1;
-          this.state.set('currentWheel', activeWheel);
-          const numSectors = activeWheel === 1 ? 6 : 5;
-          const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
-          this.state.update({ wristPos: { x: cx2, y: cl.y * h } });
+          let whList = [];
+          if (fixedW) {
+            whList = [
+              { cx: sideX, cy: h*0.7, n: 6, types: CHORD_TYPES_1, id: 1 },
+              { cx: sideX, cy: h*0.3, n: 5, types: CHORD_TYPES_2, id: 2 },
+            ];
+          } else {
+            const cx2 = (1-cl.x) * w, cy2 = cl.y * h;
+            const aw = rightLm[0].y < 0.5 ? 2 : 1;
+            this.state.set('currentWheel', aw);
+            whList = [{ cx: cx2, cy: cy2, n: aw===1?6:5, types: aw===1?CHORD_TYPES_1:CHORD_TYPES_2, id: aw }];
+          }
 
-          const d = Math.hypot(ix2-cx2, iy2-cl.y*h);
-          if (d > 8 && d < wheelR2 + 30) {
-            let angle = Math.atan2(ix2-cx2, -(iy2-cl.y*h));
-            if (angle < 0) angle += Math.PI*2;
-            const secAngle = (Math.PI*2)/numSectors;
-            const rawSec = Math.floor(angle / secAngle);
-            if (rawSec >= 0 && rawSec < numSectors) {
-              const ct = chordTypes[rawSec];
-              this.state.set('activeSector', rawSec);
-              if (ct && ct !== this.state.get('currentType') && !this.state.get('lockChordType')) {
-                this.state.set('currentType', ct);
-                this._onTypeChange(ct, rightLm);
+          // Update position for canvas
+          if (!fixedW) {
+            const cx2 = (1-cl.x) * w, cy2 = cl.y * h;
+            this.state.update({ wristPos: { x: cx2, y: cy2 } });
+          }
+
+          for (const wh of whList) {
+            const d = Math.hypot(ix2-wh.cx, iy2-wh.cy);
+            if (d < wheelR2 + 30) {
+              let angle = Math.atan2(ix2-wh.cx, -(iy2-wh.cy));
+              if (angle < 0) angle += Math.PI*2;
+              const secAngle = (Math.PI*2)/wh.n;
+              const rawSec = Math.floor(angle / secAngle);
+              if (rawSec >= 0 && rawSec < wh.n) {
+                const ct = wh.types[rawSec];
+                if (fixedW) this.state.set('currentWheel', wh.id);
+                this.state.set('activeSector', rawSec);
+                if (ct && ct !== this.state.get('currentType') && !this.state.get('lockChordType')) {
+                  this.state.set('currentType', ct);
+                  this._onTypeChange(ct, rightLm);
+                }
+                break;
               }
             }
           }
         }
       }
 
-      // ---- Fist detection: ANY hand clenched → silence ----
-      const isFist = (lm) => {
-        if (!lm) return false;
-        const ext = this.gestureRec.classify(lm).extensions;
-        return !ext.thumb && !ext.index && !ext.middle && !ext.ring && !ext.pinky;
-      };
-      const anyFist = isFist(leftLm) || isFist(rightLm);
-      if (anyFist) {
-        if (!this._fistSilenced) {
-          this._fistSilenced = true;
-          this.audio.silence();
-          this.audio.fadeOut(0.05);
-        }
-        // Skip all gesture/chord processing while fist is held
-        this.renderer.draw({ left:leftLm, right:rightLm }, this.complexity);
-        return;
-      } else if (this._fistSilenced) {
-        this._fistSilenced = false;
-        this.audio.fadeIn(0.15);
-      }
     }
+
+      // ---- Fist detection: both hands clenched → silence ----
+      if (leftLm && rightLm) {
+        const lExt = this.gestureRec.classify(leftLm).extensions;
+        const rExt = this.gestureRec.classify(rightLm).extensions;
+        const bothFist = !lExt.thumb && !lExt.index && !lExt.middle && !lExt.ring && !lExt.pinky &&
+                         !rExt.thumb && !rExt.index && !rExt.middle && !rExt.ring && !rExt.pinky;
+        if (bothFist && !this._fistSilenced) { this._fistSilenced = true; this.audio.fadeOut(0.2); }
+        else if (!bothFist && this._fistSilenced) { this._fistSilenced = false; this.audio.fadeIn(0.2); }
+      } else { this._fistSilenced = false; }
 
     // ---- Hand Lost Detection (skip in touch mode) ----
     if (!this.state.get('touchMode')) {
