@@ -206,6 +206,10 @@ body {
   0%,100% { box-shadow: 0 0 0 0 rgba(224,64,64,0.5); }
   50% { box-shadow: 0 0 0 12px rgba(224,64,64,0); }
 }
+@keyframes sample-loading {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
 
 /* ---- Menu Popup ---- */
 #menu-popup {
@@ -306,8 +310,8 @@ body {
   <h1>手势和弦乐器</h1>
   <div class="subtitle">GESTURE CHORD INSTRUMENT</div>
   <div id="progress-bar"><div id="progress-fill"></div></div>
+    <div class="loader-text" id="loader-text">Loading model…</div>
   <button id="btn-start">👆 点击开始 Tap to Start</button>
-  <div class="loader-text" id="loader-text">Loading model…</div>
   <button id="btn-skip" style="display:none;background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;margin-top:14px;font-size:12px;text-decoration:underline;">Skip camera — keyboard only</button>
 </div>
 
@@ -316,6 +320,14 @@ body {
   <div class="cal-title" id="cal-title">Make a fist ✊</div>
   <div class="cal-hint" id="cal-hint">Hold still for 2 seconds</div>
   <div class="cal-progress"><div class="cal-progress-fill" id="cal-progress-fill" style="width:0%"></div></div>
+</div>
+
+<!-- Sample loading progress -->
+<div id="sample-loading" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:80;display:none;text-align:center;">
+  <div id="sample-loading-text" style="color:#fff;font-size:14px;margin-bottom:8px;text-shadow:0 0 10px rgba(0,0,0,0.8);">Loading violin...</div>
+  <div style="width:240px;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">
+    <div id="sample-progress-fill" style="width:100%;height:100%;background:linear-gradient(90deg,#3CB89C,#FF8C42);border-radius:2px;animation:sample-loading 1.5s ease-in-out infinite;"></div>
+  </div>
 </div>
 
 <!-- Camera + Canvas -->
@@ -547,8 +559,8 @@ const CONFIG = {
   wheelRadius: 120,
   dwellTime: 400,          // ms to lock chord type
   hysteresisPx: 5,         // px into sector to register (reduced for instant response)
-  debounceFrames: 1,       // no debounce — instant response
-  cooldownMs: 50,          // minimal cooldown
+  debounceFrames: 3,
+  cooldownMs: 150,
   crossfadeMs: 0.15,       // A/B crossfade
   chordReleaseDelay: 0.018, // 18ms delay before releasing old chord (smooth overlap)
   handLostTimeout: 1000,   // 1s before hand loss triggers
@@ -968,101 +980,48 @@ class AudioEngine {
     this.ready = false;
     this.sampler = null;
     this.currentSound = null;
-    this.soundList = [];
   }
 
-  _baseUrl(soundName) {
-    // violin stays at root samples/, others in subfolders
-    if (soundName === 'violin') {
-      return 'https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/';
-    }
-    return `https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/${soundName}/`;
+  _baseUrl(s) { return s==='violin' ? 'https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/' : `https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/${s}/`; }
+  _buildUrls(p) { const u={}; const n=['C','D','E','F','G','A','B']; for(let o=5;o<=6;o++){for(const x of n){if(o===6&&n.indexOf(x)>n.indexOf('G'))break;u[x+o]=`${p}-${x}${o}.wav`;}} return u; }
+
+  async init(sound='violin') {
+    await Tone.start(); const ctx=Tone.getContext().rawContext; if(ctx.state!=='running')await ctx.resume();
+    this.masterGain=new Tone.Gain(0.5).toDestination();
+    this.reverb=new Tone.Reverb({decay:1.5,wet:0.2}); this.reverb.connect(this.masterGain); await this.reverb.generate();
+    await this._load(sound);
   }
 
-  _buildSampleUrls(prefix, isRoot) {
-    const urls = {};
-    const notes = ['C','D','E','F','G','A','B'];
-    for (let oct = 5; oct <= 6; oct++) {
-      for (const n of notes) {
-        const name = n + oct;
-        if (oct === 6 && notes.indexOf(n) > notes.indexOf('G')) break;
-        urls[name] = `${prefix}-${n}${oct}.wav`;
-      }
-    }
-    return urls;
-  }
-
-  async init(soundName = 'violin') {
-    console.log('[Audio] Starting Sampler...');
-    await Tone.start();
-    const ctx = Tone.getContext().rawContext;
-    if (ctx.state !== 'running') await ctx.resume();
-
-    this.masterGain = new Tone.Gain(0.55).toDestination();
-    this.reverb = new Tone.Reverb({ decay: 1.5, wet: 0.2 });
-    this.reverb.connect(this.masterGain);
-    await this.reverb.generate();
-
-    await this._loadSampler(soundName);
-  }
-
-  async _loadSampler(soundName) {
-    if (this.sampler) {
-      this.sampler.releaseAll();
-      this.sampler.disconnect();
-      this.sampler.dispose();
-    }
-    this.currentSound = soundName;
-    this.ready = false;
-
-    const sampleUrls = this._buildSampleUrls(soundName);
-    console.log('[Audio] Loading', soundName, Object.keys(sampleUrls).length, 'samples from', this._baseUrl(soundName));
-
-    this.sampler = new Tone.Sampler({
-      urls: sampleUrls,
-      baseUrl: this._baseUrl(soundName),
-      attack: 0.1,
-      release: 0.5,
-      curve: 'exponential',
-      maxPolyphony: 64,
-      onload: () => { console.log('[Audio]', soundName, 'ready'); this.ready = true; },
-    });
+  async _load(snd) {
+    if(this.sampler){this.sampler.dispose();}
+    this.currentSound=snd; this.ready=false;
+    const bar=document.getElementById('sample-loading'), txt=document.getElementById('sample-loading-text');
+    if(bar)bar.style.display='block'; if(txt)txt.textContent=`Loading ${snd}...`;
+    const urls=this._buildUrls(snd), base=this._baseUrl(snd);
+    this.sampler=new Tone.Sampler({urls,baseUrl:base,attack:0.1,release:0.5,maxPolyphony:64,onload:()=>{if(bar)bar.style.display='none';this.ready=true;}});
     this.sampler.connect(this.reverb);
-
-    setTimeout(() => { if (!this.ready) { this.ready = true; } }, 20000);
+    setTimeout(()=>{if(!this.ready){if(bar)bar.style.display='none';this.ready=true;}},25000);
   }
 
-  async switchSound(soundName) {
-    if (soundName === this.currentSound) return;
-    await this._loadSampler(soundName);
+  async switchSound(s) { if(s!==this.currentSound) await this._load(s); }
+
+  getNotes(root,type,st) {
+    const b=(ROOT_MIDI[root]??60)+(st||0);
+    return CHORD_INTERVALS[type].map(i=>Tone.Frequency(i+b,'midi').toNote());
   }
 
-  getNotes(root, type, semitone) {
-    const baseMIDI = (ROOT_MIDI[root] ?? 60) + (semitone || 0);
-    const intervals = CHORD_INTERVALS[type] || [0,4,7];
-    return intervals.map(i => Tone.Frequency(i + baseMIDI, 'midi').toNote());
-  }
-
-  triggerChord(root, type, semitone, velocity) {
-    if (!this.ready) return;
-    const notes = this.getNotes(root, type, semitone);
-    console.log('[Audio]', root, type, notes.join(' '));
+  triggerChord(root,type,st,vel) {
+    if(!this.ready||!this.sampler||!this.sampler.loaded)return;
+    const notes=this.getNotes(root,type,st).filter(n=>{const m=Tone.Frequency(n).toMidi();return m>=72&&m<=91;});
+    if(!notes.length)return;
+    console.log('[Audio]',root,type,notes.join(' '));
     this.sampler.releaseAll(Tone.now());
-    this.sampler.triggerAttack(notes, Tone.now() + 0.03, velocity);
+    this.sampler.triggerAttack(notes,Tone.now()+0.03,vel);
   }
 
-  silence() {
-    if (!this.ready) return;
-    try { this.sampler.releaseAll(); } catch(e) {}
-  }
-
-  fadeOut(duration) {
-    if (this.masterGain) this.masterGain.gain.rampTo(0, duration);
-  }
-
-  fadeIn(duration) {
-    if (this.masterGain) this.masterGain.gain.rampTo(0.55, duration);
-  }
+  silence() { if(this.ready)try{this.sampler.releaseAll();}catch(e){} }
+  fadeOut(d) { if(this.masterGain)this.masterGain.gain.rampTo(0,d); }
+  fadeIn(d) { if(this.masterGain)this.masterGain.gain.rampTo(0.5,d); }
 }
 
 // ================================================================
@@ -1239,15 +1198,10 @@ class CanvasRenderer {
       const activeWheel = st.get('currentWheel');
       const fixedWheel = st.get('fixedWheel');
 
-      // Wheel positions: active follows hand, inactive stays at last position
+      // Active follows hand, inactive fixed at side
       const swapped = st.get('swapHands');
       const sideX = swapped ? w * 0.25 : w * 0.75;
-      if (!this._lastWheelPos) this._lastWheelPos = { 1: {x:sideX, y:h*0.7}, 2: {x:sideX, y:h*0.3} };
       const wp = st.get('wristPos');
-      // Update last position of active wheel
-      if (!fixedWheel && st.get('rightPresent')) {
-        this._lastWheelPos[activeWheel] = { x: wp.x, y: wp.y };
-      }
       const wheels = [
         { n:6, types:CHORD_TYPES_1, labels:CHORD_LABELS_1, fx:sideX, fy:h*0.7, id:1 },
         { n:5, types:CHORD_TYPES_2, labels:CHORD_LABELS_2, fx:sideX, fy:h*0.3, id:2 },
@@ -1261,9 +1215,8 @@ class CanvasRenderer {
         } else if (isActiveWheel) {
           wx = wp.x; wy = wp.y;
         } else {
-          // Inactive: stays where it was last used
-          wx = this._lastWheelPos[wh.id].x;
-          wy = this._lastWheelPos[wh.id].y;
+          // Inactive: fixed at standby position
+          wx = wh.fx; wy = wh.fy;
         }
 
         ctx.save();
@@ -1272,8 +1225,8 @@ class CanvasRenderer {
         // Outer ring (brighter for active wheel)
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI*2);
-        ctx.strokeStyle = isActiveWheel ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.05)';
-        ctx.lineWidth = isActiveWheel ? 2 : 1;
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 2;
         ctx.stroke();
 
         const sectorAngle = (Math.PI*2)/wh.n;
@@ -1292,7 +1245,7 @@ class CanvasRenderer {
           ctx.moveTo(0,0);
           ctx.arc(0, 0, r, startA, endA);
           ctx.closePath();
-          const alpha = isActiveWheel ? (isLocked ? 0.5 : isHovered ? 0.35 : 0.12) : 0.03;
+          const alpha = isLocked ? 0.5 : isHovered ? 0.35 : 0.12;
           ctx.fillStyle = rgbToCss(...colorRgb, alpha);
           ctx.fill();
 
@@ -1316,7 +1269,7 @@ class CanvasRenderer {
           const midA = startA + sectorAngle/2;
           const lx = Math.cos(midA) * r * 0.62;
           const ly = Math.sin(midA) * r * 0.62;
-          ctx.fillStyle = isActiveWheel ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.12)';
+          ctx.fillStyle = 'rgba(255,255,255,0.9)';
           const fSize = wh.id === 2 ? Math.round(r * 0.11) : Math.round(r * 0.14);
           ctx.font = `bold ${fSize}px monospace`;
           ctx.textAlign = 'center';
@@ -1338,7 +1291,7 @@ class CanvasRenderer {
 
         ctx.beginPath();
         ctx.arc(0, 0, 3, 0, Math.PI*2);
-        ctx.fillStyle = isActiveWheel ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.06)';
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
         ctx.fill();
 
         ctx.restore();
@@ -1528,7 +1481,6 @@ class App {
     this.complexity = 'high';
     this._muted = false;
     this._fistSilenced = false;
-
     this._setupUI();
     this._setupKeyboard();
     this._setupMouse();
@@ -2100,40 +2052,24 @@ class App {
           const cl = rightLm[cIdx] || rightLm[9];
           const cx2 = (1-cl.x) * w;
 
-          // --- Wheel positions: active at hand, inactive at last position ---
-          const sideX = swapped ? w * 0.25 : w * 0.75;
-          if (!this._lastWP) this._lastWP = { 1: {x:sideX, y:h*0.7}, 2: {x:sideX, y:h*0.3} };
-          const activeId = this.state.get('currentWheel');
-          // Update last position of active wheel
-          if (!fixedW) this._lastWP[activeId] = { x: cx2, y: cl.y * h };
+          const activeWheel = rightLm[0].y < 0.5 ? 2 : 1;
+          this.state.set('currentWheel', activeWheel);
+          const numSectors = activeWheel === 1 ? 6 : 5;
+          const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
+          this.state.update({ wristPos: { x: cx2, y: cl.y * h } });
 
-          const whList = fixedW ? [
-            { cx: sideX, cy: h*0.7, n: 6, types: CHORD_TYPES_1, id: 1 },
-            { cx: sideX, cy: h*0.3, n: 5, types: CHORD_TYPES_2, id: 2 },
-          ] : [
-            { cx: activeId===1 ? cx2 : this._lastWP[1].x, cy: activeId===1 ? cl.y*h : this._lastWP[1].y, n: 6, types: CHORD_TYPES_1, id: 1 },
-            { cx: activeId===2 ? cx2 : this._lastWP[2].x, cy: activeId===2 ? cl.y*h : this._lastWP[2].y, n: 5, types: CHORD_TYPES_2, id: 2 },
-          ];
-
-          this.state.update({ wristPos: { x: cx2, y: baseY } });
-
-          // Check both — activate whichever finger is in
-          for (const wh of whList) {
-            const d = Math.hypot(ix2-wh.cx, iy2-wh.cy);
-            if (d > 8 && d < wheelR2 + 30) {
-              let angle = Math.atan2(ix2-wh.cx, -(iy2-wh.cy));
-              if (angle < 0) angle += Math.PI*2;
-              const secAngle = (Math.PI*2)/wh.n;
-              const rawSec = Math.floor(angle / secAngle);
-              if (rawSec >= 0 && rawSec < wh.n) {
-                const ct = wh.types[rawSec];
-                this.state.set('currentWheel', wh.id);
-                this.state.set('activeSector', rawSec);
-                if (ct && ct !== this.state.get('currentType') && !this.state.get('lockChordType')) {
-                  this.state.set('currentType', ct);
-                  this._onTypeChange(ct, rightLm);
-                }
-                break;
+          const d = Math.hypot(ix2-cx2, iy2-cl.y*h);
+          if (d > 8 && d < wheelR2 + 30) {
+            let angle = Math.atan2(ix2-cx2, -(iy2-cl.y*h));
+            if (angle < 0) angle += Math.PI*2;
+            const secAngle = (Math.PI*2)/numSectors;
+            const rawSec = Math.floor(angle / secAngle);
+            if (rawSec >= 0 && rawSec < numSectors) {
+              const ct = chordTypes[rawSec];
+              this.state.set('activeSector', rawSec);
+              if (ct && ct !== this.state.get('currentType') && !this.state.get('lockChordType')) {
+                this.state.set('currentType', ct);
+                this._onTypeChange(ct, rightLm);
               }
             }
           }
