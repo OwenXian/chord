@@ -1239,26 +1239,31 @@ class CanvasRenderer {
       const activeWheel = st.get('currentWheel');
       const fixedWheel = st.get('fixedWheel');
 
-      // Wheel positions flip when hands swapped
+      // Wheel positions: active follows hand, inactive stays at last position
       const swapped = st.get('swapHands');
       const sideX = swapped ? w * 0.25 : w * 0.75;
+      if (!this._lastWheelPos) this._lastWheelPos = { 1: {x:sideX, y:h*0.7}, 2: {x:sideX, y:h*0.3} };
+      const wp = st.get('wristPos');
+      // Update last position of active wheel
+      if (!fixedWheel && st.get('rightPresent')) {
+        this._lastWheelPos[activeWheel] = { x: wp.x, y: wp.y };
+      }
       const wheels = [
         { n:6, types:CHORD_TYPES_1, labels:CHORD_LABELS_1, fx:sideX, fy:h*0.7, id:1 },
         { n:5, types:CHORD_TYPES_2, labels:CHORD_LABELS_2, fx:sideX, fy:h*0.3, id:2 },
       ];
 
-      const wp = st.get('wristPos');
       for (const wh of wheels) {
         const isActiveWheel = (wh.id === activeWheel);
         let wx, wy;
         if (fixedWheel) {
           wx = wh.fx; wy = wh.fy;
         } else if (isActiveWheel) {
-          // Active wheel follows hand
           wx = wp.x; wy = wp.y;
         } else {
-          // Inactive wheel: fixed standby position (not following hand)
-          wx = wh.fx; wy = wh.fy;
+          // Inactive: stays where it was last used
+          wx = this._lastWheelPos[wh.id].x;
+          wy = this._lastWheelPos[wh.id].y;
         }
 
         ctx.save();
@@ -2095,19 +2100,19 @@ class App {
           const cl = rightLm[cIdx] || rightLm[9];
           const cx2 = (1-cl.x) * w;
 
-          // --- Two wheels: each at its own position ---
+          // --- Wheel positions: active at hand, inactive at last position ---
           const sideX = swapped ? w * 0.25 : w * 0.75;
-          const baseY = cl.y * h;
+          if (!this._lastWP) this._lastWP = { 1: {x:sideX, y:h*0.7}, 2: {x:sideX, y:h*0.3} };
           const activeId = this.state.get('currentWheel');
+          // Update last position of active wheel
+          if (!fixedW) this._lastWP[activeId] = { x: cx2, y: cl.y * h };
 
-          // Each wheel = { cx, cy, n, types, labels, id }
-          const whList = [
-            { cx: fixedW ? sideX : (activeId===1 ? cx2 : sideX),
-              cy: fixedW ? h*0.7 : (activeId===1 ? baseY : h*0.7),
-              n: 6, types: CHORD_TYPES_1, id: 1 },
-            { cx: fixedW ? sideX : (activeId===2 ? cx2 : sideX),
-              cy: fixedW ? h*0.3 : (activeId===2 ? baseY : h*0.3),
-              n: 5, types: CHORD_TYPES_2, id: 2 },
+          const whList = fixedW ? [
+            { cx: sideX, cy: h*0.7, n: 6, types: CHORD_TYPES_1, id: 1 },
+            { cx: sideX, cy: h*0.3, n: 5, types: CHORD_TYPES_2, id: 2 },
+          ] : [
+            { cx: activeId===1 ? cx2 : this._lastWP[1].x, cy: activeId===1 ? cl.y*h : this._lastWP[1].y, n: 6, types: CHORD_TYPES_1, id: 1 },
+            { cx: activeId===2 ? cx2 : this._lastWP[2].x, cy: activeId===2 ? cl.y*h : this._lastWP[2].y, n: 5, types: CHORD_TYPES_2, id: 2 },
           ];
 
           this.state.update({ wristPos: { x: cx2, y: baseY } });
