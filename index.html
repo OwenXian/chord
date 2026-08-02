@@ -724,13 +724,10 @@ class HandTracker {
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18',
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision',
     ];
-    // Model URLs — lite for mobile, full for desktop
-    const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
-    const modelUrls = isMobile ? [
-      'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/lite/hand_landmarker.task',
+    // Model URLs
+    const modelUrls = [
       'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-    ] : [
-      'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+      './hand_landmarker.task',
     ];
 
     let vision = null;
@@ -750,7 +747,7 @@ class HandTracker {
 
     // Mobile: CPU first, desktop: GPU first
     const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
-    const delegates = isMobile ? ['CPU', 'GPU'] : ['GPU', 'CPU'];
+    const delegates = ['GPU', 'CPU'];
     let lastErr = null;
     for (const modelUrl of modelUrls) {
       for (const delegate of delegates) {
