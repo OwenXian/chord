@@ -232,8 +232,7 @@ body {
 
 /* ---- Virtual Keyboard (left side, vertical) ---- */
 #keyboard {
-  position: fixed; left: 16px; top: 50%; transform: translateY(-50%);
-  z-index: 50; display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 4px;
 }
 .key-btn {
   width: 44px; height: 44px; border-radius: 6px;
@@ -341,6 +340,7 @@ body {
 </div>
 
 <!-- Virtual Keyboard (left, vertical) -->
+<div id="keyboard-wrap" style="position:fixed;left:16px;top:50%;transform:translateY(-50%);z-index:50;display:flex;flex-direction:column;align-items:center;gap:10px;">
 <div id="keyboard">
   <div class="key-btn" data-root="C">C<span class="key-label">A</span></div>
   <div class="key-btn" data-root="D">D<span class="key-label">S</span></div>
@@ -349,6 +349,10 @@ body {
   <div class="key-btn" data-root="G">G<span class="key-label">G</span></div>
   <div class="key-btn" data-root="A">A<span class="key-label">H</span></div>
   <div class="key-btn" data-root="B">B<span class="key-label">J</span></div>
+</div>
+  <div style="height:40px;"></div>
+  <button class="oct-btn key-btn active" data-note="A" data-state="high" style="width:44px;height:44px;font-size:12px;font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;">A<span style="font-size:8px;opacity:0.6;">High</span></button>
+  <button class="oct-btn key-btn active" data-note="B" data-state="high" style="width:44px;height:44px;font-size:12px;font-weight:600;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;">B<span style="font-size:8px;opacity:0.6;">High</span></button>
 </div>
 
 <!-- Volume Slider (right side) -->
@@ -529,7 +533,7 @@ const GESTURE_ROOTS = {
   thumb_index:             'B',
 };
 
-const ROOT_MIDI = { C:72,'C#':73,D:74,'D#':75,E:76,F:77,'F#':78,G:79,'G#':80,A:81,'A#':82,B:83 };
+const ROOT_MIDI = { C:72,'C#':73,D:74,'D#':75,E:76,F:77,'F#':78,G:79,'G#':80,A:69,'A#':70,B:71 };
 // C5-B5 range, matches violin samples C5-G6
 
 const CONFIG = {
@@ -960,7 +964,7 @@ class AudioEngine {
   }
 
   _baseUrl(s) { return s==='violin' ? 'https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/' : `https://cdn.jsdelivr.net/gh/OwenXian/chord@main/samples/${s}/`; }
-  _buildUrls(p) { const u={}; const nat=['C','D','E','F','G','A','B']; const all=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; for(let o=5;o<=6;o++){for(const x of all){if(o===6&&all.indexOf(x)>all.indexOf('G'))break; const nearest=nat.reduce((a,b)=>Math.abs(all.indexOf(b)-all.indexOf(x))<Math.abs(all.indexOf(a)-all.indexOf(x))?b:a); u[x+o]=`${p}-${nearest}${o}.wav`;}} return u; }
+  _buildUrls(p) { const u={}; const n=['C','D','E','F','G','A','B']; for(let o=5;o<=6;o++){for(const x of n){if(o===6&&n.indexOf(x)>n.indexOf('G'))break;u[x+o]=`${p}-${x}${o}.wav`;}} return u; }
 
   async _load(snd) {
     if(this.sampler){this.sampler.dispose();}
@@ -995,14 +999,10 @@ class AudioEngine {
   triggerChord(root,type,st,vel) {
     if(!this.ready||!this.sampler)return;
     const notes=this.getNotes(root,type,st);
+    if(!notes.length)return;
     console.log('[Audio]',root,type,notes.join(' '));
-    const old = this._activeNotes || [];
-    this._activeNotes = notes;
-    const now = Tone.now();
-    // Trigger new notes
-    notes.forEach(n => { if(!old.includes(n)) this.sampler.triggerAttack(n, now, vel); });
-    // Release old notes not in new chord (delayed overlap)
-    old.forEach(n => { if(!notes.includes(n)) this.sampler.triggerRelease(n, now+0.06); });
+    this.sampler.releaseAll(Tone.now());
+    this.sampler.triggerAttack(notes,Tone.now()+0.03,vel);
   }
 
   silence() { if(this.ready)try{this.sampler.releaseAll();}catch(e){} }
@@ -1709,6 +1709,27 @@ class App {
       }
     });
 
+    // A/B octave toggles
+    this._abOctave = { A: 'high', B: 'high' };
+    document.querySelectorAll('.oct-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const note = btn.dataset.note;
+        const cur = btn.dataset.state;
+        const next = cur === 'high' ? 'low' : 'high';
+        btn.dataset.state = next;
+        btn.innerHTML = note + '<span style="font-size:8px;opacity:0.6;display:block;">' + (next === 'high' ? 'High' : 'Low') + '</span>';
+        btn.classList.toggle('active', next === 'high');
+        btn.style.background = next === 'high' ? '' : 'rgba(255,100,100,0.3)';
+        this._abOctave[note] = next;
+        // Update actual ROOT_MIDI for this note and its sharp
+        const baseHigh = note === 'A' ? 81 : 83;
+        const baseLow = note === 'A' ? 69 : 71;
+        ROOT_MIDI[note] = next === 'high' ? baseHigh : baseLow;
+        ROOT_MIDI[note + '#'] = next === 'high' ? baseHigh + 1 : baseLow + 1;
+        this._triggerChordFromState();
+      });
+    });
+
     // Volume slider
     const volumeSlider = document.getElementById('volume-slider');
     volumeSlider.addEventListener('input', () => {
@@ -2033,29 +2054,41 @@ class App {
           const ix2 = (1-indexTip.x) * w;
           const iy2 = indexTip.y * h;
 
-          // --- Two wheels at offset positions ---
+          // --- Wheel detection ---
           const cIdx = this.state.get('wheelCenterIdx') === 0 ? 9 : this.state.get('wheelCenterIdx') === 1 ? 0 : 5;
           const cl = rightLm[cIdx] || rightLm[9];
-          const cx2 = (1-cl.x) * w;
+          const sideX = swapped ? w * 0.25 : w * 0.75;
 
-          const activeWheel = rightLm[0].y < 0.5 ? 2 : 1;
-          this.state.set('currentWheel', activeWheel);
-          const numSectors = activeWheel === 1 ? 6 : 5;
-          const chordTypes = activeWheel === 1 ? CHORD_TYPES_1 : CHORD_TYPES_2;
-          this.state.update({ wristPos: { x: cx2, y: cl.y * h } });
+          let whList = [];
+          if (fixedW) {
+            whList = [
+              { cx: sideX, cy: h*0.7, n: 6, types: CHORD_TYPES_1, id: 1 },
+              { cx: sideX, cy: h*0.3, n: 5, types: CHORD_TYPES_2, id: 2 },
+            ];
+          } else {
+            const cx2 = (1-cl.x) * w, cy2 = cl.y * h;
+            const aw = rightLm[0].y < 0.5 ? 2 : 1;
+            this.state.set('currentWheel', aw);
+            this.state.update({ wristPos: { x: cx2, y: cy2 } });
+            whList = [{ cx: cx2, cy: cy2, n: aw===1?6:5, types: aw===1?CHORD_TYPES_1:CHORD_TYPES_2, id: aw }];
+          }
 
-          const d = Math.hypot(ix2-cx2, iy2-cl.y*h);
-          if (d < wheelR2 + 30) {
-            let angle = Math.atan2(ix2-cx2, -(iy2-cl.y*h));
-            if (angle < 0) angle += Math.PI*2;
-            const secAngle = (Math.PI*2)/numSectors;
-            const rawSec = Math.floor(angle / secAngle);
-            if (rawSec >= 0 && rawSec < numSectors) {
-              const ct = chordTypes[rawSec];
-              this.state.set('activeSector', rawSec);
-              if (ct && ct !== this.state.get('currentType') && !this.state.get('lockChordType')) {
-                this.state.set('currentType', ct);
-                this._onTypeChange(ct, rightLm);
+          for (const wh of whList) {
+            const d = Math.hypot(ix2-wh.cx, iy2-wh.cy);
+            if (d < wheelR2 + 30) {
+              let angle = Math.atan2(ix2-wh.cx, -(iy2-wh.cy));
+              if (angle < 0) angle += Math.PI*2;
+              const secAngle = (Math.PI*2)/wh.n;
+              const rawSec = Math.floor(angle / secAngle);
+              if (rawSec >= 0 && rawSec < wh.n) {
+                const ct = wh.types[rawSec];
+                if (fixedW) this.state.set('currentWheel', wh.id);
+                this.state.set('activeSector', rawSec);
+                if (ct && ct !== this.state.get('currentType') && !this.state.get('lockChordType')) {
+                  this.state.set('currentType', ct);
+                  this._onTypeChange(ct, rightLm);
+                }
+                break;
               }
             }
           }
