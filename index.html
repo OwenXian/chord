@@ -1942,8 +1942,10 @@ class App {
     const dt = (timestamp - this.lastFrameTime) / 1000;
     this.lastFrameTime = timestamp;
 
-    // Run hand detection (always, even if video state changes)
-    const result = this.handTracker.detect(this.video, timestamp);
+    // Run hand detection (skip every other frame on mobile for performance)
+    const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+    this._frameSkip = (this._frameSkip || 0) + 1;
+    const result = (!isMobile || this._frameSkip % 2 === 0) ? this.handTracker.detect(this.video, timestamp) : this.handTracker.lastResult;
     const landmarks = result?.landmarks || [];
     const handedness = result?.handedness || [];
 
