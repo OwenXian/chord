@@ -263,6 +263,7 @@ body {
   outline: none; cursor: pointer;
   writing-mode: vertical-lr;
   accent-color: var(--chord-color);
+  direction: rtl;
 }
 #volume-label {
   font-size: 11px; color: rgba(255,255,255,0.5);
@@ -1840,9 +1841,9 @@ class App {
     // Volume slider
     const volumeSlider = document.getElementById('volume-slider');
     volumeSlider.addEventListener('input', () => {
-      const vol = (100 - parseInt(volumeSlider.value)) / 100;
+      const vol = parseInt(volumeSlider.value) / 100;
       if (this.audio.masterGain) {
-        this.audio.masterGain.gain.rampTo(0.1 + vol * 0.7, 0.05);
+        this.audio.masterGain.gain.rampTo(vol * 0.8, 0.05);
       }
     });
 
