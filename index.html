@@ -745,8 +745,6 @@ class HandTracker {
 
     if (onProgress) onProgress(40);
 
-    // Mobile: CPU first, desktop: GPU first
-    const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
     const delegates = ['GPU', 'CPU'];
     let lastErr = null;
     for (const modelUrl of modelUrls) {
