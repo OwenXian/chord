@@ -206,6 +206,7 @@ body {
   0%,100% { box-shadow: 0 0 0 0 rgba(224,64,64,0.5); }
   50% { box-shadow: 0 0 0 12px rgba(224,64,64,0); }
 }
+@keyframes loadPulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
 /* ---- Menu Popup ---- */
 #menu-popup {
@@ -318,15 +319,20 @@ body {
   <div class="cal-progress"><div class="cal-progress-fill" id="cal-progress-fill" style="width:0%"></div></div>
 </div>
 
+<!-- Sample loading -->
+<div id="sample-loading" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:85;display:none;text-align:center;pointer-events:none;">
+  <div id="sample-loading-text" style="color:#fff;font-size:15px;margin-bottom:10px;text-shadow:0 0 8px rgba(0,0,0,0.8);">Loading violin...</div>
+  <div style="width:260px;height:5px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
+    <div id="sample-progress-fill" style="width:60%;height:100%;background:linear-gradient(90deg,#3CB89C,#FF8C42);border-radius:3px;animation:loadPulse 1.2s ease-in-out infinite;"></div>
+  </div>
+</div>
+
 <!-- Camera + Canvas -->
 <video id="video" autoplay playsinline muted webkit-playsinline></video>
 <canvas id="canvas"></canvas>
 
 <!-- Chord Display -->
 <div id="chord-display">C maj7</div>
-
-<!-- Debug log (mobile) -->
-<div id="debug-log" style="position:fixed;bottom:0;left:0;right:0;z-index:300;background:rgba(0,0,0,0.8);color:#0f0;font:10px monospace;max-height:80px;overflow-y:auto;padding:4px 8px;pointer-events:none;display:none;"></div>
 
 <!-- Hand Lost Guide -->
 <div id="hand-lost-guide">
@@ -414,23 +420,6 @@ body {
 <!-- JavaScript -->
 <!-- ============================================================ -->
 <script type="module">
-// ---- On-screen debug log for mobile ----
-(function() {
-  const dbg = document.getElementById('debug-log');
-  const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
-  if (isMobile) dbg.style.display = 'block';
-  const orig = { log:console.log, warn:console.warn, error:console.error };
-  function add(level, args) {
-    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a).slice(0,80)).join(' ');
-    dbg.textContent = '[' + level + '] ' + msg + '\n' + dbg.textContent;
-    dbg.textContent = dbg.textContent.split('\n').slice(0,8).join('\n');
-	orig[level].apply(console, args);
-  }
-  console.log = (...a) => add('log', a);
-  console.warn = (...a) => add('warn', a);
-  console.error = (...a) => add('err', a);
-})();
-
 // ================================================================
 // SECTION 1: MEDIAPIPE DYNAMIC IMPORT WITH FALLBACKS
 // ================================================================
@@ -606,7 +595,7 @@ class StateManager extends Emitter {
       currentType: 'maj7',
       currentSemitone: 0,  // -1=♭, 0=natural, +1=♯
       currentWheel: 1,      // 1=lower wheel (6 types), 2=upper wheel (5 types)
-      fixedWheel: false,
+      fixedWheel: true,
       lockChordType: false,
       wheelCenterIdx: 0,   // selected landmark index (0-20)
       selectCenterMode: false,
@@ -976,14 +965,16 @@ class AudioEngine {
   async _load(snd) {
     if(this.sampler){this.sampler.dispose();}
     this.currentSound=snd; this.ready=false;
+    const bar=document.getElementById('sample-loading'), txt=document.getElementById('sample-loading-text');
+    if(bar)bar.style.display='block'; if(txt)txt.textContent=`Loading ${snd}...`;
     const urls=this._buildUrls(snd), base=this._baseUrl(snd);
     console.log('[Audio] Loading',snd,Object.keys(urls).length,'samples');
     await new Promise((resolve) => {
       this.sampler=new Tone.Sampler({urls,baseUrl:base,attack:0.1,release:0.5,maxPolyphony:64,
-        onload:()=>{console.log('[Audio]',snd,'loaded');this.ready=true;resolve();}
+        onload:()=>{console.log('[Audio]',snd,'loaded');this.ready=true;if(bar)bar.style.display='none';resolve();}
       });
       this.sampler.connect(this.reverb);
-      setTimeout(()=>{if(!this.ready){this.ready=true;resolve();}},25000);
+      setTimeout(()=>{if(!this.ready){this.ready=true;if(bar)bar.style.display='none';resolve();}},25000);
     });
   }
 
