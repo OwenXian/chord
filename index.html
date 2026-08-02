@@ -1942,31 +1942,7 @@ class App {
     const dt = (timestamp - this.lastFrameTime) / 1000;
     this.lastFrameTime = timestamp;
 
-    // Skip detection if video not ready, but keep loop alive
-    if (this.video.readyState < 2) {
-      this.renderer.draw({ left:null, right:null }, this.complexity);
-      return;
-    }
-
-    // FPS tracking
-    this.fpsTimes.push(timestamp);
-    while (this.fpsTimes.length > CONFIG.fpsWindow) this.fpsTimes.shift();
-    if (this.fpsTimes.length >= 2) {
-      const dur = this.fpsTimes[this.fpsTimes.length-1] - this.fpsTimes[0];
-      const fps = Math.round((this.fpsTimes.length-1) / (dur/1000));
-      this.state.set('fps', Math.min(fps, 60));
-    }
-
-    // Complexity adaptation
-    const fps = this.state.get('fps');
-    if (fps < CONFIG.fpsLowThreshold && this.complexity !== 'low') {
-      this.complexity = 'low';
-    } else if (fps > 35 && this.complexity === 'low') {
-      this.complexity = 'high';
-    }
-    this.state.set('complexity', this.complexity);
-
-    // Run hand detection
+    // Run hand detection (always, even if video state changes)
     const result = this.handTracker.detect(this.video, timestamp);
     const landmarks = result?.landmarks || [];
     const handedness = result?.handedness || [];
