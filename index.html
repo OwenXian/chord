@@ -337,7 +337,7 @@ body {
 
 <!-- Wheel edit panel -->
 <div id="wheel-edit-panel" style="position:fixed;left:68px;top:50%;transform:translateY(-50%);z-index:90;display:none;flex-direction:column;gap:6px;background:rgba(10,10,30,0.92);padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);backdrop-filter:blur(10px);min-width:140px;cursor:default;">
-  <div id="wheel-edit-drag-handle" style="height:8px;background:rgba(255,255,255,0.06);border-radius:4px;margin-bottom:4px;cursor:grab;"></div>
+  <div id="wheel-edit-drag" style="height:8px;background:rgba(255,255,255,0.06);border-radius:4px;margin-bottom:4px;cursor:grab;"></div>
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <span id="wheel-edit-label" style="color:#fff;font-size:13px;font-weight:600;">Wheel 1</span>
     <button id="btn-wheel-edit-done" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:16px;">✕</button>
@@ -394,7 +394,6 @@ body {
     <button class="menu-btn" id="btn-wheel-center">🎯 Pick Center</button>
     <button class="menu-btn" id="btn-swap-hands">🔄 Swap Hands</button>
     <button class="menu-btn" id="btn-touch-mode">👈 Touch Mode</button>
-    <button class="menu-btn" id="btn-show-skeleton">🦴 手部节点</button>
     <button class="menu-btn" id="btn-edit-wheels">✋ Edit Wheels</button>
     <button class="menu-btn" id="btn-lang">🌐 EN</button>
     <button class="menu-btn menu-close" id="btn-menu-close">✕ Close</button>
@@ -631,11 +630,9 @@ class StateManager extends Emitter {
       selectCenterMode: false,
       touchMode: false,
       editWheels: false,
-      showSkeleton: false,
       wheelPos: { w1x:0.75, w1y:0.7, w2x:0.75, w2y:0.3 },
       wheelScaleW1: 1.0, wheelScaleW2: 1.0,
       swapHands: false,
-      lang: 'zh',
       muted: false,
       // Calibration
       calPhase: 'idle', // idle|fist|open|done
@@ -1156,8 +1153,7 @@ class CanvasRenderer {
     // ---- Update particles ----
     this.particles.update(dt);
 
-    // ---- Draw skeletons (if enabled) ----
-    if (!st.get('showSkeleton')) { /* skip */ } else {
+    // ---- Draw skeletons ----
     const hands = [];
     if (landmarksData.left) hands.push({ lm:landmarksData.left, label:'L' });
     if (landmarksData.right) hands.push({ lm:landmarksData.right, label:'R' });
@@ -1210,7 +1206,6 @@ class CanvasRenderer {
         }
       }
     }
-    } // end showSkeleton
 
     // ---- Draw BOTH chord wheels ----
     if (st.get('rightPresent') || st.get('fixedWheel')) {
@@ -1537,51 +1532,32 @@ class App {
       await this.start(true);
     });
 
-    // Drag the edit panel itself
-    const dragHandle = document.getElementById('wheel-edit-drag-handle');
-    dragHandle.addEventListener('mousedown', e => {
-      e.preventDefault();
-      const panel = document.getElementById('wheel-edit-panel');
-      const startX = e.clientX, startY = e.clientY;
-      const startLeft = panel.offsetLeft, startTop = panel.offsetTop;
-      const onMove = ev => {
-        panel.style.left = (startLeft + ev.clientX - startX) + 'px';
-        panel.style.top = (startTop + ev.clientY - startY) + 'px';
-        panel.style.transform = 'none';
-      };
-      const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); dragHandle.style.cursor = 'grab'; };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-      document.addEventListener('touchmove', onMove, {passive:false});
-      document.addEventListener('touchend', onUp);
-      dragHandle.style.cursor = 'grabbing';
-    });
-    dragHandle.addEventListener('touchstart', e => {
-      e.preventDefault();
-      const panel = document.getElementById('wheel-edit-panel');
-      const startX = e.touches[0].clientX, startY = e.touches[0].clientY;
-      const startLeft = panel.offsetLeft, startTop = panel.offsetTop;
-      const onMove = ev => {
-        ev.preventDefault();
-        panel.style.left = (startLeft + ev.touches[0].clientX - startX) + 'px';
-        panel.style.top = (startTop + ev.touches[0].clientY - startY) + 'px';
-        panel.style.transform = 'none';
-      };
-      const onUp = () => { document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); };
-      document.addEventListener('touchmove', onMove, {passive:false});
-      document.addEventListener('touchend', onUp);
+    // Wheel edit: tap to select (mobile)
+    this.canvas.addEventListener('touchstart', e => {
+      if (!this.state.get('editWheels')) return;
+      const rect = this.canvas.getBoundingClientRect();
+      const mx = (e.touches[0].clientX - rect.left) / rect.width;
+      const my = (e.touches[0].clientY - rect.top) / rect.height;
+      const wp = this.state.get('wheelPos');
+      if (Math.hypot(mx-wp.w1x, my-wp.w1y) < 0.12) { this._editWheelTarget = 1;
+        slX.value = Math.round(wp.w1x*100); slY.value = Math.round(wp.w1y*100);
+        slS.value = Math.round((this.state.get('wheelScaleW1')||1)*100);
+        document.getElementById('wheel-edit-label').textContent = 'Wheel 1'; }
+      if (Math.hypot(mx-wp.w2x, my-wp.w2y) < 0.12) { this._editWheelTarget = 2;
+        slX.value = Math.round(wp.w2x*100); slY.value = Math.round(wp.w2y*100);
+        slS.value = Math.round((this.state.get('wheelScaleW2')||1)*100);
+        document.getElementById('wheel-edit-label').textContent = 'Wheel 2'; }
     });
 
     // Wheel edit: drag to move
     this.canvas.addEventListener('mousedown', e => {
       if (!this.state.get('editWheels')) return;
       const rect = this.canvas.getBoundingClientRect();
-      const mx = (e.clientX - rect.left) * (this.canvas.width / rect.width);
-      const my = (e.clientY - rect.top) * (this.canvas.height / rect.height);
-      if (selectWheel(mx, my)) updateEditUI();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       const wp = this.state.get('wheelPos');
-      this._dragW = [{k:'w1',x:wp.w1x*this.canvas.width,y:wp.w1y*this.canvas.height},{k:'w2',x:wp.w2x*this.canvas.width,y:wp.w2y*this.canvas.height}].find(w => Math.hypot(mx-w.x, my-w.y) < 180)?.k || null;
-      if (this._dragW) { this._editWheelTarget = this._dragW === 'w1' ? 1 : 2; this.canvas.style.cursor = 'grabbing'; }
+      const r = Math.min(this.canvas.width, this.canvas.height) * 0.20;
+      this._dragW = [{k:'w1',x:wp.w1x*this.canvas.width,y:wp.w1y*this.canvas.height},{k:'w2',x:wp.w2x*this.canvas.width,y:wp.w2y*this.canvas.height}].find(w => Math.hypot(mx-w.x, my-w.y) < r + 20)?.k || null;
+      if (this._dragW) { this._editWheelTarget = this._dragW === 'w1' ? 1 : 2; this.canvas.style.cursor = 'grabbing'; document.getElementById('wheel-edit-label').textContent = 'Wheel ' + this._editWheelTarget; }
     });
     document.addEventListener('mousemove', e => {
       if (!this._dragW || !this.state.get('editWheels')) return;
@@ -1606,39 +1582,9 @@ class App {
       document.getElementById('wheel-slider-size').value = Math.round((this.state.get(key)||1.0)*100);
     }, {passive:false});
 
-    // Edit mode: tap to select wheel (mobile support)
-    const selectWheel = (mx, my) => {
-      if (!this.state.get('editWheels')) return false;
-      const wp = this.state.get('wheelPos');
-      const r = Math.min(this.canvas.width, this.canvas.height) * 0.20;
-      const sx = mx / this.canvas.width, sy = my / this.canvas.height;
-      if (Math.hypot(sx-wp.w1x, sy-wp.w1y) < r * 2 / this.canvas.width) { this._editWheelTarget = 1; return true; }
-      if (Math.hypot(sx-wp.w2x, sy-wp.w2y) < r * 2 / this.canvas.width) { this._editWheelTarget = 2; return true; }
-      return false;
-    };
-    const updateEditUI = () => {
-      const t = this._editWheelTarget;
-      const wp = this.state.get('wheelPos');
-      slX.value = Math.round((t===1?wp.w1x:wp.w2x)*100);
-      slY.value = Math.round((t===1?wp.w1y:wp.w2y)*100);
-      slS.value = Math.round((this.state.get(t===1?'wheelScaleW1':'wheelScaleW2')||1.0)*100);
-      document.getElementById('wheel-edit-label').textContent = 'Wheel ' + t;
-    };
-
+    // Canvas click: pick center landmark OR touch mode wheel tap
     this.canvas.addEventListener('click', (e) => {
-      const rect = this.canvas.getBoundingClientRect();
-      const mx = (e.clientX - rect.left) * (this.canvas.width / rect.width);
-      const my = (e.clientY - rect.top) * (this.canvas.height / rect.height);
-      if (selectWheel(mx, my)) { updateEditUI(); return; }
       if (this.state.get('editWheels')) return;
-    });
-    // Touch for mobile wheel selection
-    this.canvas.addEventListener('touchstart', (e) => {
-      if (!this.state.get('editWheels')) return;
-      const rect = this.canvas.getBoundingClientRect();
-      const mx = (e.touches[0].clientX - rect.left) * (this.canvas.width / rect.width);
-      const my = (e.touches[0].clientY - rect.top) * (this.canvas.height / rect.height);
-      if (selectWheel(mx, my)) updateEditUI();
       const rect = this.canvas.getBoundingClientRect();
       const sx = this.canvas.width / rect.width;
       const sy = this.canvas.height / rect.height;
@@ -1703,12 +1649,12 @@ class App {
       if (this.state.get('muted')) {
         this.state.set('muted', false);
         this.audio.masterGain.gain.rampTo(0.6, 0.1);
-        btn.textContent = this.state.get('lang') === 'zh' ? '🔊 静音' : '🔊 Mute';
+        btn.textContent = '🔊 静音';
         btn.classList.remove('active');
       } else {
         this.state.set('muted', true);
         this.audio.masterGain.gain.rampTo(0, 0.05);
-        btn.textContent = this.state.get('lang') === 'zh' ? '🔇 取消静音' : '🔇 Unmute';
+        btn.textContent = '🔇 取消静音';
         btn.classList.add('active');
       }
     });
@@ -1764,14 +1710,6 @@ class App {
       document.getElementById('btn-swap-hands').classList.toggle('active', !cur);
     });
 
-    // Menu: Show skeleton toggle
-    document.getElementById('btn-show-skeleton').addEventListener('click', ()=>{
-      const cur = this.state.get('showSkeleton');
-      this.state.set('showSkeleton', !cur);
-      document.getElementById('btn-show-skeleton').classList.toggle('active', !cur);
-      document.getElementById('menu-popup').classList.remove('show');
-    });
-
     // Menu: Touch mode
     document.getElementById('btn-touch-mode').addEventListener('click', ()=>{
       const cur = this.state.get('touchMode');
@@ -1822,12 +1760,10 @@ class App {
     });
     // Reset button
     const btnReset = document.createElement('button');
-    btnReset.textContent = '还原'; btnReset.style.cssText = 'padding:3px 10px;font-size:11px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff;cursor:pointer;margin-left:auto;';
+    btnReset.textContent = '还原'; btnReset.style.cssText = 'padding:3px 10px;font-size:11px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff;cursor:pointer;margin-left:8px;';
     btnReset.addEventListener('click', ()=>{
-      const def = { w1x:0.75, w1y:0.7, w2x:0.75, w2y:0.3 };
-      this.state.set('wheelPos', {...def});
-      this.state.set('wheelScaleW1', 1.0);
-      this.state.set('wheelScaleW2', 1.0);
+      this.state.set('wheelPos', {w1x:0.75,w1y:0.7,w2x:0.75,w2y:0.3});
+      this.state.set('wheelScaleW1', 1.0); this.state.set('wheelScaleW2', 1.0);
       slX.value = 75; slY.value = 70; slS.value = 100;
     });
     document.getElementById('wheel-edit-panel').querySelector('div:nth-of-type(2)').appendChild(btnReset);
@@ -1836,6 +1772,30 @@ class App {
       this.state.set('editWheels', false); editPanel.style.display = 'none';
       document.getElementById('btn-edit-wheels').classList.remove('active');
     });
+
+    // Panel drag (mouse + touch)
+    const dragBar = document.getElementById('wheel-edit-drag');
+    const dragPanel = (startX, startY) => {
+      const panel = editPanel;
+      const sLeft = panel.offsetLeft, sTop = panel.offsetTop;
+      const onMove = (ev) => {
+        const cx = ev.touches ? ev.touches[0].clientX : ev.clientX;
+        const cy = ev.touches ? ev.touches[0].clientY : ev.clientY;
+        panel.style.left = (sLeft + cx - startX) + 'px';
+        panel.style.top = (sTop + cy - startY) + 'px';
+        panel.style.transform = 'none';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp);
+        dragBar.style.cursor = 'grab';
+      };
+      document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+      document.addEventListener('touchmove', onMove, {passive:false}); document.addEventListener('touchend', onUp);
+      dragBar.style.cursor = 'grabbing';
+    };
+    dragBar.addEventListener('mousedown', e => { e.preventDefault(); dragPanel(e.clientX, e.clientY); });
+    dragBar.addEventListener('touchstart', e => { e.preventDefault(); dragPanel(e.touches[0].clientX, e.touches[0].clientY); });
 
     // Language toggle
     document.getElementById('btn-lang').addEventListener('click', ()=>{
@@ -2011,8 +1971,8 @@ class App {
 
   _updateLang(lang) {
     const t = {
-      zh: { splashTitle:'手势和弦乐器', splashSub:'GESTURE CHORD INSTRUMENT', startBtn:'开始体验', mute:'🔊 静音', fixWheel:'📍 固定轮盘', rec:'⏺ 录音', menu:'☰ 菜单', volume:'VOL', lockChord:'🔒 锁定和弦', pickCenter:'追踪点位选择', swapHands:'🔄 交换左右手', touchMode:'👈 触屏模式', editWheels:'✋ 编辑轮盘', showSkeleton:'🦴 手部节点', },
-      en: { splashTitle:'Gesture Chord Instrument', splashSub:'', startBtn:'Start', mute:'🔊 Mute', fixWheel:'📍 Fix Wheel', rec:'⏺ Rec', menu:'☰ Menu', volume:'VOL', lockChord:'🔒 Lock Chord', pickCenter:'🎯 Pick Center', swapHands:'🔄 Swap Hands', touchMode:'👈 Touch Mode', editWheels:'✋ Edit Wheels', showSkeleton:'🦴 Show Nodes', },
+      zh: { splashTitle:'手势和弦乐器', splashSub:'GESTURE CHORD INSTRUMENT', startBtn:'开始体验', mute:'🔊 静音', fixWheel:'📍 固定轮盘', rec:'⏺ 录音', menu:'☰ 菜单', volume:'VOL', lockChord:'🔒 锁定和弦', pickCenter:'🎯 选择中心点', swapHands:'🔄 交换左右手', touchMode:'👈 触屏模式', editWheels:'✋ 编辑轮盘', },
+      en: { splashTitle:'Gesture Chord Instrument', splashSub:'', startBtn:'Start', mute:'🔊 Mute', fixWheel:'📍 Fix Wheel', rec:'⏺ Rec', menu:'☰ Menu', volume:'VOL', lockChord:'🔒 Lock Chord', pickCenter:'🎯 Pick Center', swapHands:'🔄 Swap Hands', touchMode:'👈 Touch Mode', editWheels:'✋ Edit Wheels', },
     };
     const d = t[lang] || t.zh;
     document.querySelector('#splash h1').textContent = d.splashTitle;
@@ -2021,16 +1981,13 @@ class App {
     document.getElementById('btn-fixed-wheel').textContent = d.fixWheel;
     document.getElementById('btn-menu').textContent = d.menu;
     document.getElementById('btn-record-audio').textContent = d.rec;
-    const mb = document.getElementById('btn-mute');
-    mb.textContent = this.state.get('muted') ? (lang==='zh'?'🔇 取消静音':'🔇 Unmute') : d.mute;
+    document.getElementById('btn-mute').textContent = d.mute;
     document.getElementById('volume-label').textContent = d.volume;
     document.getElementById('btn-lock-chord').textContent = d.lockChord;
-    const bc = document.getElementById('btn-wheel-center');
-    if (bc && !this.state.get('selectCenterMode')) bc.textContent = d.pickCenter;
+    document.getElementById('btn-wheel-center').textContent = d.pickCenter;
     document.getElementById('btn-swap-hands').textContent = d.swapHands;
     document.getElementById('btn-touch-mode').textContent = d.touchMode;
     document.getElementById('btn-edit-wheels').textContent = d.editWheels;
-    document.getElementById('btn-show-skeleton').textContent = d.showSkeleton;
   }
 
   _triggerChordFromState() {
@@ -2117,7 +2074,7 @@ class App {
       const ctx = Tone.getContext().rawContext;
       if (ctx.state !== 'running') await ctx.resume();
       // Play an audible click to fully unlock mobile audio
-      const click = new Tone.Oscillator(880, 'sine').connect(new Tone.Gain(0.05).toDestination());
+      const click = new Tone.Oscillator(880, 'sine').connect(new Tone.Gain(0).toDestination());
       click.start().stop('+0.08');
     } catch(e) { console.warn('Audio unlock:', e); }
     await audioPromise;
@@ -2126,11 +2083,9 @@ class App {
       // Skip calibration — use default thresholds
       this.state.set('calPhase', 'done');
       this.state.set('stage', 'active');
-      this._triggerChordFromState();
     } else {
       // No camera: keyboard/mouse mode
       this.state.set('stage', 'active');
-      this._triggerChordFromState();
       const guideMsg = this.ui.handLostGuide.querySelector('.hand-text');
       if (skipCamera) {
         guideMsg.textContent = '⌨ Keyboard mode — ASDFGHJ = C-B roots, 1-6 = chord types';
