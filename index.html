@@ -336,7 +336,8 @@ body {
 <div id="chord-display">C maj7</div>
 
 <!-- Wheel edit panel -->
-<div id="wheel-edit-panel" style="position:fixed;right:20px;bottom:100px;z-index:90;display:none;flex-direction:column;gap:6px;background:rgba(10,10,30,0.92);padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);backdrop-filter:blur(10px);min-width:140px;">
+<div id="wheel-edit-panel" style="position:fixed;left:68px;top:50%;transform:translateY(-50%);z-index:90;display:none;flex-direction:column;gap:6px;background:rgba(10,10,30,0.92);padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);backdrop-filter:blur(10px);min-width:140px;cursor:default;">
+  <div id="wheel-edit-drag-handle" style="height:8px;background:rgba(255,255,255,0.06);border-radius:4px;margin-bottom:4px;cursor:grab;"></div>
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <span id="wheel-edit-label" style="color:#fff;font-size:13px;font-weight:600;">Wheel 1</span>
     <button id="btn-wheel-edit-done" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:16px;">✕</button>
@@ -393,6 +394,7 @@ body {
     <button class="menu-btn" id="btn-wheel-center">🎯 Pick Center</button>
     <button class="menu-btn" id="btn-swap-hands">🔄 Swap Hands</button>
     <button class="menu-btn" id="btn-touch-mode">👈 Touch Mode</button>
+    <button class="menu-btn" id="btn-show-skeleton">🦴 手部节点</button>
     <button class="menu-btn" id="btn-edit-wheels">✋ Edit Wheels</button>
     <button class="menu-btn" id="btn-lang">🌐 EN</button>
     <button class="menu-btn menu-close" id="btn-menu-close">✕ Close</button>
@@ -629,9 +631,12 @@ class StateManager extends Emitter {
       selectCenterMode: false,
       touchMode: false,
       editWheels: false,
+      showSkeleton: false,
       wheelPos: { w1x:0.75, w1y:0.7, w2x:0.75, w2y:0.3 },
       wheelScaleW1: 1.0, wheelScaleW2: 1.0,
       swapHands: false,
+      lang: 'zh',
+      muted: false,
       // Calibration
       calPhase: 'idle', // idle|fist|open|done
       calProgress: 0,
@@ -1025,6 +1030,7 @@ class AudioEngine {
 
   triggerChord(root,type,st,vel) {
     if(!this.ready||!this.sampler)return;
+    if(this.state.get('muted'))return;
     const notes=this.getNotes(root,type,st);
     if(!notes.length)return;
     console.log('[Audio]',root,type,notes.join(' '));
@@ -1150,7 +1156,8 @@ class CanvasRenderer {
     // ---- Update particles ----
     this.particles.update(dt);
 
-    // ---- Draw skeletons ----
+    // ---- Draw skeletons (if enabled) ----
+    if (!st.get('showSkeleton')) { /* skip */ } else {
     const hands = [];
     if (landmarksData.left) hands.push({ lm:landmarksData.left, label:'L' });
     if (landmarksData.right) hands.push({ lm:landmarksData.right, label:'R' });
@@ -1203,6 +1210,7 @@ class CanvasRenderer {
         }
       }
     }
+    } // end showSkeleton
 
     // ---- Draw BOTH chord wheels ----
     if (st.get('rightPresent') || st.get('fixedWheel')) {
@@ -1529,6 +1537,24 @@ class App {
       await this.start(true);
     });
 
+    // Drag the edit panel itself
+    const dragHandle = document.getElementById('wheel-edit-drag-handle');
+    dragHandle.addEventListener('mousedown', e => {
+      e.preventDefault();
+      const panel = document.getElementById('wheel-edit-panel');
+      const startX = e.clientX, startY = e.clientY;
+      const startLeft = panel.offsetLeft, startTop = panel.offsetTop;
+      const onMove = ev => {
+        panel.style.left = (startLeft + ev.clientX - startX) + 'px';
+        panel.style.top = (startTop + ev.clientY - startY) + 'px';
+        panel.style.transform = 'none';
+      };
+      const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); dragHandle.style.cursor = 'grab'; };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      dragHandle.style.cursor = 'grabbing';
+    });
+
     // Wheel edit: drag to move
     this.canvas.addEventListener('mousedown', e => {
       if (!this.state.get('editWheels')) return;
@@ -1626,15 +1652,15 @@ class App {
     // Mute button
     document.getElementById('btn-mute').addEventListener('click', ()=>{
       const btn = document.getElementById('btn-mute');
-      if (this._muted) {
-        this._muted = false;
+      if (this.state.get('muted')) {
+        this.state.set('muted', false);
         this.audio.masterGain.gain.rampTo(0.6, 0.1);
-        btn.textContent = '🔊 Mute';
+        btn.textContent = this.state.get('lang') === 'zh' ? '🔊 静音' : '🔊 Mute';
         btn.classList.remove('active');
       } else {
-        this._muted = true;
+        this.state.set('muted', true);
         this.audio.masterGain.gain.rampTo(0, 0.05);
-        btn.textContent = '🔇 Unmute';
+        btn.textContent = this.state.get('lang') === 'zh' ? '🔇 取消静音' : '🔇 Unmute';
         btn.classList.add('active');
       }
     });
@@ -1688,6 +1714,14 @@ class App {
       const cur = this.state.get('swapHands');
       this.state.set('swapHands', !cur);
       document.getElementById('btn-swap-hands').classList.toggle('active', !cur);
+    });
+
+    // Menu: Show skeleton toggle
+    document.getElementById('btn-show-skeleton').addEventListener('click', ()=>{
+      const cur = this.state.get('showSkeleton');
+      this.state.set('showSkeleton', !cur);
+      document.getElementById('btn-show-skeleton').classList.toggle('active', !cur);
+      document.getElementById('menu-popup').classList.remove('show');
     });
 
     // Menu: Touch mode
@@ -1917,8 +1951,8 @@ class App {
 
   _updateLang(lang) {
     const t = {
-      zh: { splashTitle:'手势和弦乐器', splashSub:'GESTURE CHORD INSTRUMENT', startBtn:'开始体验', mute:'🔊 静音', fixWheel:'📍 固定轮盘', rec:'⏺ 录音', menu:'☰ 菜单', volume:'VOL', lockChord:'🔒 锁定和弦', pickCenter:'🎯 选择中心点', swapHands:'🔄 交换左右手', touchMode:'👈 触屏模式', editWheels:'✋ 编辑轮盘', },
-      en: { splashTitle:'Gesture Chord Instrument', splashSub:'', startBtn:'Start', mute:'🔊 Mute', fixWheel:'📍 Fix Wheel', rec:'⏺ Rec', menu:'☰ Menu', volume:'VOL', lockChord:'🔒 Lock Chord', pickCenter:'🎯 Pick Center', swapHands:'🔄 Swap Hands', touchMode:'👈 Touch Mode', editWheels:'✋ Edit Wheels', },
+      zh: { splashTitle:'手势和弦乐器', splashSub:'GESTURE CHORD INSTRUMENT', startBtn:'开始体验', mute:'🔊 静音', fixWheel:'📍 固定轮盘', rec:'⏺ 录音', menu:'☰ 菜单', volume:'VOL', lockChord:'🔒 锁定和弦', pickCenter:'追踪点位选择', swapHands:'🔄 交换左右手', touchMode:'👈 触屏模式', editWheels:'✋ 编辑轮盘', showSkeleton:'🦴 手部节点', },
+      en: { splashTitle:'Gesture Chord Instrument', splashSub:'', startBtn:'Start', mute:'🔊 Mute', fixWheel:'📍 Fix Wheel', rec:'⏺ Rec', menu:'☰ Menu', volume:'VOL', lockChord:'🔒 Lock Chord', pickCenter:'🎯 Pick Center', swapHands:'🔄 Swap Hands', touchMode:'👈 Touch Mode', editWheels:'✋ Edit Wheels', showSkeleton:'🦴 Show Nodes', },
     };
     const d = t[lang] || t.zh;
     document.querySelector('#splash h1').textContent = d.splashTitle;
@@ -1927,13 +1961,16 @@ class App {
     document.getElementById('btn-fixed-wheel').textContent = d.fixWheel;
     document.getElementById('btn-menu').textContent = d.menu;
     document.getElementById('btn-record-audio').textContent = d.rec;
-    document.getElementById('btn-mute').textContent = d.mute;
+    const mb = document.getElementById('btn-mute');
+    mb.textContent = this.state.get('muted') ? (lang==='zh'?'🔇 取消静音':'🔇 Unmute') : d.mute;
     document.getElementById('volume-label').textContent = d.volume;
     document.getElementById('btn-lock-chord').textContent = d.lockChord;
-    document.getElementById('btn-wheel-center').textContent = d.pickCenter;
+    const bc = document.getElementById('btn-wheel-center');
+    if (bc && !this.state.get('selectCenterMode')) bc.textContent = d.pickCenter;
     document.getElementById('btn-swap-hands').textContent = d.swapHands;
     document.getElementById('btn-touch-mode').textContent = d.touchMode;
     document.getElementById('btn-edit-wheels').textContent = d.editWheels;
+    document.getElementById('btn-show-skeleton').textContent = d.showSkeleton;
   }
 
   _triggerChordFromState() {
@@ -2255,7 +2292,7 @@ class App {
       if (this.state.get('isHandLost')) {
         this.state.set('isHandLost', false);
         this.state.set('handLostStart', null);
-        if (!this._muted) {
+        if (!this.state.get('muted')) {
           this.audio.fadeIn(CONFIG.fadeInDuration);
         }
       }
