@@ -1549,10 +1549,27 @@ class App {
         panel.style.top = (startTop + ev.clientY - startY) + 'px';
         panel.style.transform = 'none';
       };
-      const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); dragHandle.style.cursor = 'grab'; };
+      const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); dragHandle.style.cursor = 'grab'; };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
+      document.addEventListener('touchmove', onMove, {passive:false});
+      document.addEventListener('touchend', onUp);
       dragHandle.style.cursor = 'grabbing';
+    });
+    dragHandle.addEventListener('touchstart', e => {
+      e.preventDefault();
+      const panel = document.getElementById('wheel-edit-panel');
+      const startX = e.touches[0].clientX, startY = e.touches[0].clientY;
+      const startLeft = panel.offsetLeft, startTop = panel.offsetTop;
+      const onMove = ev => {
+        ev.preventDefault();
+        panel.style.left = (startLeft + ev.touches[0].clientX - startX) + 'px';
+        panel.style.top = (startTop + ev.touches[0].clientY - startY) + 'px';
+        panel.style.transform = 'none';
+      };
+      const onUp = () => { document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); };
+      document.addEventListener('touchmove', onMove, {passive:false});
+      document.addEventListener('touchend', onUp);
     });
 
     // Wheel edit: drag to move
@@ -1772,6 +1789,18 @@ class App {
       const v = this.state.get(this._editWheelTarget === 1 ? 'wheelScaleW1' : 'wheelScaleW2');
       this.state.set('wheelScaleW1', v); this.state.set('wheelScaleW2', v);
     });
+    // Reset button
+    const btnReset = document.createElement('button');
+    btnReset.textContent = '还原'; btnReset.style.cssText = 'padding:3px 10px;font-size:11px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff;cursor:pointer;margin-left:auto;';
+    btnReset.addEventListener('click', ()=>{
+      const def = { w1x:0.75, w1y:0.7, w2x:0.75, w2y:0.3 };
+      this.state.set('wheelPos', {...def});
+      this.state.set('wheelScaleW1', 1.0);
+      this.state.set('wheelScaleW2', 1.0);
+      slX.value = 75; slY.value = 70; slS.value = 100;
+    });
+    document.getElementById('wheel-edit-panel').querySelector('div:nth-of-type(2)').appendChild(btnReset);
+
     document.getElementById('btn-wheel-edit-done').addEventListener('click', ()=>{
       this.state.set('editWheels', false); editPanel.style.display = 'none';
       document.getElementById('btn-edit-wheels').classList.remove('active');
